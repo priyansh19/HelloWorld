@@ -152,8 +152,16 @@ class MetricsSampler:
         self._nvml_handle = None
         self._npu = None            # PerfCounter | None
         self._gpu_engine = None     # PerfCounter fallback | None
+        self._wtemps = None         # WinTemps | None (lazy)
         self._init_psutil()
         self._init_nvml()
+
+    def _win_temps(self):
+        """Lazily start the Windows temperature poller (no-op off Windows)."""
+        if self._wtemps is None:
+            from ._wintemp import WinTemps
+            self._wtemps = WinTemps()
+        return self._wtemps
 
     # -- backend init -------------------------------------------------- #
     def _init_psutil(self) -> None:
@@ -301,10 +309,14 @@ class MetricsSampler:
 
     def cpu_temp(self) -> Metric:
         t = self._sensor_temp("coretemp", "k10temp", "cpu", "acpitz", "zenpower")
+        source = ""
+        if t is None:
+            wt = self._win_temps().get()
+            t, source = wt.get("cpu"), wt.get("source", "")
         if t is None:
             return Metric("cpu_temp", "CPU Temp", "temp", available=False,
                           detail="no sensor")
-        return Metric("cpu_temp", "CPU Temp", "temp", t)
+        return Metric("cpu_temp", "CPU Temp", "temp", float(t), detail=source)
 
     def gpu_temp(self) -> Metric:
         if self._nvml_ok:
@@ -315,15 +327,23 @@ class MetricsSampler:
                               detail=self.gpu_name())
             except Exception:
                 pass
+        wt = self._win_temps().get()
+        if wt.get("gpu") is not None:
+            return Metric("gpu_temp", "GPU Temp", "temp", float(wt["gpu"]),
+                          detail=wt.get("source", ""))
         return Metric("gpu_temp", "GPU Temp", "temp", available=False,
-                      detail="no NVIDIA GPU")
+                      detail="no sensor")
 
     def mem_temp(self) -> Metric:
         t = self._sensor_temp("dimm", "spd", "mem", "ddr")
+        source = ""
+        if t is None:
+            wt = self._win_temps().get()
+            t, source = wt.get("mem"), wt.get("source", "")
         if t is None:
             return Metric("mem_temp", "Mem Temp", "temp", available=False,
                           detail="no sensor")
-        return Metric("mem_temp", "Mem Temp", "temp", t)
+        return Metric("mem_temp", "Mem Temp", "temp", float(t), detail=source)
 
     # -- dispatch ------------------------------------------------------- #
     def read(self, key: str, process_name: str = "") -> Metric:
