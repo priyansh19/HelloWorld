@@ -1,9 +1,4 @@
-"""Settings dialog: every user-tunable option in one tabbed window.
-
-The dialog reads a :class:`~memgraph.config.Config`, lets the user edit it, and
-on *Save* returns a new validated Config. Applying it to the running widget and
-persisting to disk is the caller's job (see ``app.py``).
-"""
+"""Settings dialog: choose metrics, tune sampling, and style the widget."""
 
 from __future__ import annotations
 
@@ -18,7 +13,7 @@ from .config import (
     REFRESH_MS_MAX,
     REFRESH_MS_MIN,
 )
-from .metrics import MetricsSampler
+from .metrics import METRIC_DEFS, MetricsSampler
 
 
 class SettingsDialog(QtWidgets.QDialog):
@@ -27,78 +22,83 @@ class SettingsDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle("MemGraph — Settings")
         self.setModal(True)
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(440)
         self._cfg = config
         self._sampler = sampler
+        self._metric_checks: dict[str, QtWidgets.QCheckBox] = {}
 
         tabs = QtWidgets.QTabWidget()
-        tabs.addTab(self._build_metrics_tab(), "Metrics")
-        tabs.addTab(self._build_appearance_tab(), "Appearance")
-        tabs.addTab(self._build_behaviour_tab(), "Behaviour")
+        tabs.addTab(self._metrics_tab(), "Metrics")
+        tabs.addTab(self._appearance_tab(), "Appearance")
+        tabs.addTab(self._behaviour_tab(), "Behaviour")
 
         buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel
-        )
+            QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.addWidget(tabs)
-        layout.addWidget(buttons)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(tabs)
+        lay.addWidget(buttons)
 
     # ------------------------------------------------------------------ #
-    # Tabs
-    # ------------------------------------------------------------------ #
-    def _build_metrics_tab(self) -> QtWidgets.QWidget:
+    def _metrics_tab(self) -> QtWidgets.QWidget:
         w = QtWidgets.QWidget()
         form = QtWidgets.QFormLayout(w)
 
-        self.chk_ram = QtWidgets.QCheckBox("Show system RAM")
-        self.chk_ram.setChecked(self._cfg.show_ram)
+        hint = QtWidgets.QLabel(
+            "Tick the metrics to show. The first ticked metric is the primary "
+            "one drawn as the big graph.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: gray; font-size: 11px;")
+        form.addRow(hint)
 
-        self.chk_vram = QtWidgets.QCheckBox("Show GPU VRAM")
-        self.chk_vram.setChecked(self._cfg.show_vram)
+        enabled = set(self._cfg.enabled_metrics)
+        for d in METRIC_DEFS:
+            chk = QtWidgets.QCheckBox(f"{d.label}  —  {d.description}")
+            chk.setChecked(d.key in enabled)
+            self._metric_checks[d.key] = chk
+            form.addRow(chk)
+
         gpu = self._sampler.gpu_name()
         gpu_hint = QtWidgets.QLabel(
-            f"Detected: {gpu}" if self._sampler.gpu_available
-            else "No NVIDIA GPU detected — VRAM will show as n/a"
-        )
+            f"GPU detected: {gpu}" if self._sampler.gpu_available
+            else "No NVIDIA GPU detected — VRAM/GPU/GPU-temp show n/a.")
         gpu_hint.setStyleSheet("color: gray; font-size: 11px;")
+        gpu_hint.setWordWrap(True)
+        form.addRow(gpu_hint)
 
-        self.chk_proc = QtWidgets.QCheckBox("Track a process")
-        self.chk_proc.setChecked(self._cfg.show_process)
         self.edit_proc = QtWidgets.QLineEdit(self._cfg.process_name)
         self.edit_proc.setPlaceholderText("e.g. ollama.exe")
-
-        form.addRow(self.chk_ram)
-        form.addRow(self.chk_vram)
-        form.addRow("", gpu_hint)
-        form.addRow(self.chk_proc)
-        form.addRow("Process name:", self.edit_proc)
+        form.addRow("Process to track:", self.edit_proc)
 
         self.spin_refresh = QtWidgets.QSpinBox()
         self.spin_refresh.setRange(REFRESH_MS_MIN, REFRESH_MS_MAX)
         self.spin_refresh.setSingleStep(250)
         self.spin_refresh.setSuffix(" ms")
         self.spin_refresh.setValue(self._cfg.refresh_ms)
+        form.addRow("Refresh interval:", self.spin_refresh)
 
         self.spin_history = QtWidgets.QSpinBox()
         self.spin_history.setRange(HISTORY_MIN, HISTORY_MAX)
         self.spin_history.setSingleStep(30)
         self.spin_history.setSuffix(" s")
         self.spin_history.setValue(self._cfg.history_seconds)
-
-        form.addRow("Refresh interval:", self.spin_refresh)
-        form.addRow("History length:", self.spin_history)
+        form.addRow("History window:", self.spin_history)
         return w
 
-    def _build_appearance_tab(self) -> QtWidgets.QWidget:
+    def _appearance_tab(self) -> QtWidgets.QWidget:
         w = QtWidgets.QWidget()
         form = QtWidgets.QFormLayout(w)
 
         self.combo_theme = QtWidgets.QComboBox()
-        self.combo_theme.addItems(["dark", "light"])
+        self.combo_theme.addItems(["midnight", "graphite", "light"])
         self.combo_theme.setCurrentText(self._cfg.theme)
+        form.addRow("Theme:", self.combo_theme)
+
+        self.chk_spark = QtWidgets.QCheckBox("Show the sparkline graph")
+        self.chk_spark.setChecked(self._cfg.show_sparkline)
+        form.addRow(self.chk_spark)
 
         self.slider_opacity = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.slider_opacity.setRange(20, 100)
@@ -106,67 +106,74 @@ class SettingsDialog(QtWidgets.QDialog):
         self.lbl_opacity = QtWidgets.QLabel(f"{int(self._cfg.opacity * 100)}%")
         self.slider_opacity.valueChanged.connect(
             lambda v: self.lbl_opacity.setText(f"{v}%"))
-        op_row = QtWidgets.QHBoxLayout()
-        op_row.addWidget(self.slider_opacity)
-        op_row.addWidget(self.lbl_opacity)
-        op_widget = QtWidgets.QWidget()
-        op_widget.setLayout(op_row)
+        row = QtWidgets.QWidget()
+        rl = QtWidgets.QHBoxLayout(row)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.addWidget(self.slider_opacity)
+        rl.addWidget(self.lbl_opacity)
+        form.addRow("Opacity:", row)
 
         self.spin_amber = QtWidgets.QSpinBox()
         self.spin_amber.setRange(1, 99)
         self.spin_amber.setSuffix(" %")
         self.spin_amber.setValue(self._cfg.threshold_amber)
-
         self.spin_red = QtWidgets.QSpinBox()
         self.spin_red.setRange(2, 100)
         self.spin_red.setSuffix(" %")
         self.spin_red.setValue(self._cfg.threshold_red)
+        form.addRow("Amber at (usage):", self.spin_amber)
+        form.addRow("Red at (usage):", self.spin_red)
 
-        form.addRow("Theme:", self.combo_theme)
-        form.addRow("Opacity:", op_widget)
-        form.addRow("Amber threshold:", self.spin_amber)
-        form.addRow("Red threshold:", self.spin_red)
+        self.spin_tamber = QtWidgets.QSpinBox()
+        self.spin_tamber.setRange(20, 110)
+        self.spin_tamber.setSuffix(" °C")
+        self.spin_tamber.setValue(self._cfg.temp_amber)
+        self.spin_tred = QtWidgets.QSpinBox()
+        self.spin_tred.setRange(21, 120)
+        self.spin_tred.setSuffix(" °C")
+        self.spin_tred.setValue(self._cfg.temp_red)
+        form.addRow("Amber at (temp):", self.spin_tamber)
+        form.addRow("Red at (temp):", self.spin_tred)
         return w
 
-    def _build_behaviour_tab(self) -> QtWidgets.QWidget:
+    def _behaviour_tab(self) -> QtWidgets.QWidget:
         w = QtWidgets.QWidget()
         form = QtWidgets.QFormLayout(w)
-
         self.chk_ontop = QtWidgets.QCheckBox("Always on top")
         self.chk_ontop.setChecked(self._cfg.always_on_top)
-
         self.chk_snap = QtWidgets.QCheckBox("Snap to screen edges")
         self.chk_snap.setChecked(self._cfg.snap_to_edges)
-
         self.chk_autostart = QtWidgets.QCheckBox("Start automatically at login")
         self.chk_autostart.setChecked(self._cfg.autostart)
-
         self.chk_hidden = QtWidgets.QCheckBox("Start hidden (tray only)")
         self.chk_hidden.setChecked(self._cfg.start_hidden)
-
-        form.addRow(self.chk_ontop)
-        form.addRow(self.chk_snap)
-        form.addRow(self.chk_autostart)
-        form.addRow(self.chk_hidden)
+        for c in (self.chk_ontop, self.chk_snap, self.chk_autostart, self.chk_hidden):
+            form.addRow(c)
         return w
 
     # ------------------------------------------------------------------ #
-    # Result
-    # ------------------------------------------------------------------ #
     def result_config(self) -> Config:
-        """Build a validated Config from the widget states (post-accept)."""
+        # Preserve enabled order: keep previously-enabled order, then append
+        # newly-ticked metrics in registry order.
+        prev = [k for k in self._cfg.enabled_metrics
+                if self._metric_checks[k].isChecked()]
+        added = [d.key for d in METRIC_DEFS
+                 if self._metric_checks[d.key].isChecked() and d.key not in prev]
+        enabled = prev + added
+
         return replace(
             self._cfg,
-            show_ram=self.chk_ram.isChecked(),
-            show_vram=self.chk_vram.isChecked(),
-            show_process=self.chk_proc.isChecked(),
+            enabled_metrics=enabled,
             process_name=self.edit_proc.text().strip(),
             refresh_ms=self.spin_refresh.value(),
             history_seconds=self.spin_history.value(),
             theme=self.combo_theme.currentText(),
+            show_sparkline=self.chk_spark.isChecked(),
             opacity=self.slider_opacity.value() / 100.0,
             threshold_amber=self.spin_amber.value(),
             threshold_red=self.spin_red.value(),
+            temp_amber=self.spin_tamber.value(),
+            temp_red=self.spin_tred.value(),
             always_on_top=self.chk_ontop.isChecked(),
             snap_to_edges=self.chk_snap.isChecked(),
             autostart=self.chk_autostart.isChecked(),

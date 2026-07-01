@@ -26,6 +26,6 @@ echo [4/4] Building executable with PyInstaller...
 pyinstaller --noconfirm MemGraph.spec
 
 echo.
-echo Done. Your widget is at: dist\MemGraph.exe
-echo Double-click it to run, or enable autostart from the Settings dialog.
+echo Done. Your installer is at: dist\MemGraph-Setup.exe
+echo Double-click it to open the setup UI and install the widget.
 endlocal

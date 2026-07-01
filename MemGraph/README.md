@@ -1,32 +1,43 @@
-# MemGraph — Windows Memory Widget for Local LLMs
+# MemGraph — Windows Memory & Hardware Widget for Local LLMs
 
-A lightweight, always-on-top desktop widget that shows **live memory usage as a
-rolling graph + percentage**, purpose-built to watch memory pressure while
-running local LLMs (Ollama, llama.cpp, LM Studio, …).
+A lightweight, professional desktop widget that shows your system memory — and
+CPU, GPU, NPU and temperatures — as a **live, hand-painted graph**, purpose-built
+for keeping an eye on memory pressure while running local LLMs (Ollama,
+llama.cpp, LM Studio, …).
 
-- 📈 **Live graph** of the primary metric with a big % readout
-- 🧠 Monitors **system RAM**, **NVIDIA GPU VRAM**, and a **chosen process**
-  (e.g. `ollama.exe`) — VRAM is usually the real bottleneck for local models
-- 🎨 Frameless, rounded, semi-transparent panel — **drag it anywhere**, snaps to
-  screen edges, remembers its position
-- 🟢🟡🔴 Colour thresholds (green → amber → red) as memory fills
-- ⚙️ Full **settings** page (metrics, refresh rate, history length, opacity,
-  theme, thresholds, autostart)
-- 🚀 **Autostarts at login** (toggleable) and lives in the **system tray**
-- 🪶 Tiny footprint (~40–60 MB) — a memory monitor that doesn't hog memory
+![The widget](assets/screenshot-widget.png)
+
+- 📈 **Custom-painted live graph** — smooth curve, gradient glow, no clutter
+  (no chart library; drawn with QPainter)
+- 🧠 **Built for local LLMs** — watch **RAM**, **GPU VRAM** and your **model
+  process** (e.g. `ollama.exe`) in real time
+- 🧩 **Fully customisable metrics** — mix and match **RAM, CPU, GPU, NPU,
+  process memory** and **CPU / GPU / memory temperatures** (shown when sensors
+  expose them)
+- 🎨 Frameless, glassy, drop-shadowed panel with **3 themes** — drag it
+  anywhere, snaps to edges, remembers its position
+- 🟢🟡🔴 Colour thresholds (green → amber → red) for both usage and temperature
+- 🔒 **Single instance** — launching again just surfaces the running widget
+- 🚀 **Modern setup wizard**, **autostart at login**, and a **system-tray** icon
+- 🪶 Tiny footprint — a memory monitor that doesn't hog memory
+
+| Widget themes | Setup wizard |
+|---|---|
+| ![Graphite theme](assets/screenshot-graphite.png) | ![Setup](assets/screenshot-setup.png) |
 
 ---
 
-## Quick start (pre-built .exe)
+## Install (recommended)
 
-1. Grab `MemGraph.exe` from the **GitHub Actions** run for your branch:
-   open the *Build MemGraph (Windows)* workflow → latest run → **Artifacts** →
-   `MemGraph-windows`.
-2. Unzip and double-click `MemGraph.exe`.
-3. Right-click the widget (or the tray icon) → **Settings…** to configure.
+1. Download **`MemGraph-Setup.exe`** — the login-free direct link:
+   **https://github.com/priyansh19/HelloWorld/releases/download/memgraph-latest/MemGraph-Setup.exe**
+2. Run it. The **setup wizard** opens: pick a folder, choose autostart / desktop
+   shortcut, and click **Install**. No admin rights.
+3. The widget launches and lives in your system tray. Right-click it (or the
+   tray icon) → **Settings…** to choose metrics and styling.
 
-No install, no admin rights. Autostart is enabled by default; turn it off in
-Settings → *Behaviour*.
+> Windows SmartScreen may warn because the exe is unsigned — click
+> **More info → Run anyway**.
 
 ## Build it yourself (Windows)
 
@@ -37,9 +48,7 @@ build.bat
 ```
 
 `build.bat` creates a virtualenv, installs deps, runs the tests, and produces
-`dist\MemGraph.exe`.
-
-Manual equivalent:
+`dist\MemGraph-Setup.exe`. Manual equivalent:
 
 ```bat
 python -m venv .venv && .venv\Scripts\activate
@@ -52,43 +61,47 @@ pyinstaller --noconfirm MemGraph.spec
 
 ```bash
 pip install -r requirements.txt
-python -m memgraph      # or: python run.py
+python -m memgraph --widget      # the widget
+python -m memgraph --setup       # the installer UI
 ```
 
-> The GUI needs a desktop session. The core logic (sampling, config, history)
-> is fully unit-tested and runs headless.
+> The GUI needs a desktop session. The core logic (metrics, config, history) is
+> fully unit-tested and runs headless.
 
 ---
 
-## Configuration
+## Metrics
 
-Settings are stored at `%LOCALAPPDATA%\MemGraph\config.json` and edited from the
-in-app **Settings** dialog (right-click the widget → *Settings…*).
+Enable any combination from **Settings → Metrics**. The first enabled metric is
+the primary one drawn as the big graph.
 
-| Setting | What it does |
-|---|---|
-| Show RAM / VRAM / Process | Which metrics appear. Primary metric = first enabled |
-| Process name | Process to track, e.g. `ollama.exe` (matches with/without `.exe`) |
-| Refresh interval | Sampling period (250 ms – 10 s) |
-| History length | Time window shown in the graph (30 s – 60 min) |
-| Theme / Opacity | Dark or light; panel transparency |
-| Amber / Red thresholds | Percentages at which the colour changes |
-| Always on top / Snap to edges | Window behaviour |
-| Start at login | Registers under `HKCU\…\Run` (no admin needed) |
-| Start hidden | Launch to the tray only |
+| Metric | Source | Notes |
+|---|---|---|
+| RAM | psutil | Always available |
+| CPU | psutil | Total utilisation |
+| VRAM | NVML (`nvidia-ml-py`) | NVIDIA only; else `n/a` |
+| GPU | NVML, else GPU-engine perf counter | Utilisation % |
+| NPU | Windows PDH perf counter | Best-effort (Windows 11); else `n/a` |
+| Process | psutil | Tracks e.g. `ollama.exe` (with/without `.exe`) |
+| CPU / Mem / GPU Temp | psutil sensors / NVML | Shown only when a sensor reports it |
 
-## How autostart works
+Anything a machine can't read shows a muted **`n/a`** row — nothing crashes.
 
-MemGraph writes a `MemGraph` value under
-`HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` pointing at the
-running executable. Toggling *Start at login* in Settings adds/removes it. No
-admin rights, nothing left behind if you disable it.
+## Settings
 
-## GPU / VRAM notes
+Stored at `%LOCALAPPDATA%\MemGraph\config.json`, edited from the in-app dialog:
+metrics selection, tracked process, refresh interval, history window, theme,
+sparkline on/off, opacity, usage & temperature colour thresholds, always-on-top,
+edge-snap, autostart and start-hidden.
 
-VRAM monitoring uses NVIDIA's NVML via `nvidia-ml-py`. On machines without an
-NVIDIA GPU (or without the driver), the VRAM row shows **n/a** and everything
-else keeps working. AMD/Intel VRAM is not yet supported.
+## How autostart & install work
+
+- **Install** copies the exe to `%LOCALAPPDATA%\Programs\MemGraph`, drops a
+  Start-menu (and optional desktop) shortcut, and writes an install marker.
+- **Autostart** registers `MemGraph.exe --widget` under
+  `HKCU\…\CurrentVersion\Run` — no admin rights, cleanly removed when disabled.
+- **Single instance** is enforced with a `QSharedMemory` claim + a local socket;
+  a second launch pings the first to surface itself, then exits.
 
 ---
 
@@ -97,21 +110,25 @@ else keeps working. AMD/Intel VRAM is not yet supported.
 ```
 MemGraph/
   memgraph/
-    metrics.py         # sampling (psutil + pynvml) + pure interpretation logic
-    history.py         # fixed-size ring buffer backing the graph
-    config.py          # dataclass config, JSON load/save, validation
-    autostart.py       # Windows Run-key management (no-op elsewhere)
-    widget.py          # frameless draggable graph panel (Qt)
-    settings_dialog.py # tabbed settings UI
-    tray.py            # system-tray icon + menu
-    app.py             # wiring + entrypoint
-  tests/               # pytest for the non-GUI logic (43 tests)
-  MemGraph.spec        # PyInstaller build definition
-  build.bat            # one-command local build
+    metrics.py          # Metric model + providers (psutil / NVML / PDH), pure logic
+    _perf.py            # Windows PDH reader for NPU / GPU-engine utilisation
+    history.py          # fixed-size ring buffer backing the graph
+    config.py           # dataclass config, JSON load/save, validation, migration
+    autostart.py        # Windows Run-key management (no-op elsewhere)
+    sparkline.py        # hand-painted smooth graph (QPainter)
+    widget.py           # glassy frameless panel: hero value, sparkline, metric bars
+    settings_dialog.py  # tabbed settings UI
+    installer.py        # modern setup window + install logic
+    single_instance.py  # QSharedMemory + local-socket single-instance guard
+    tray.py             # system-tray icon + menu
+    app.py              # mode dispatch (--setup/--widget) + wiring
+  tests/                # pytest for the non-GUI logic
+  MemGraph.spec         # PyInstaller build (-> MemGraph-Setup.exe)
+  build.bat             # one-command local build
 ```
 
 The non-GUI modules have **no Qt dependency**, so they're unit-tested on any OS
-and in CI. The GUI is a thin layer over that tested core.
+and in CI. The GUI is a thin, tested layer over that core.
 
 ## Development
 
@@ -120,5 +137,6 @@ pip install -r requirements-dev.txt
 pytest -q
 ```
 
-CI (`.github/workflows/build-memgraph.yml`) runs the tests and builds the `.exe`
-on a Windows runner for every push touching `MemGraph/`.
+CI (`.github/workflows/build-memgraph.yml`) runs the tests, builds
+`MemGraph-Setup.exe` on a Windows runner, and publishes it to the
+`memgraph-latest` GitHub Release for every push touching `MemGraph/`.

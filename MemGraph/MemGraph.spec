@@ -1,13 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for MemGraph.
 
-Produces a single windowed .exe (no console) named MemGraph.exe.
+Produces a single windowed installer/app: MemGraph-Setup.exe. Run with no args
+it shows the setup UI; once installed, the copied MemGraph.exe runs the widget.
+
 Build with:  pyinstaller --noconfirm MemGraph.spec
 """
 
-from PyInstaller.utils.hooks import collect_submodules
+import os
 
-hiddenimports = collect_submodules("pyqtgraph") + ["pynvml"]
+hiddenimports = ["pynvml", "PySide6.QtNetwork"]
 
 a = Analysis(
     ["run.py"],
@@ -18,7 +20,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "matplotlib", "PyQt5", "PyQt6"],
+    excludes=["tkinter", "matplotlib", "PyQt5", "PyQt6", "pyqtgraph", "numpy"],
     noarchive=False,
 )
 
@@ -30,18 +32,18 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="MemGraph",
+    name="MemGraph-Setup",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,          # windowed app, no console window
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon="assets/icon.ico" if __import__("os").path.exists("assets/icon.ico") else None,
+    icon="assets/icon.ico" if os.path.exists("assets/icon.ico") else None,
 )

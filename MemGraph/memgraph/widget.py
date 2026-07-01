@@ -1,11 +1,9 @@
-"""The floating, frameless, always-on-top graph widget.
+"""The floating, frameless, always-on-top widget — the premium UI surface.
 
-This is the visible surface of MemGraph: a compact rounded panel showing a
-live scrolling area-graph of the primary metric plus a big percentage readout
-and one row per enabled metric. The whole panel is draggable so it can be
-placed anywhere on the desktop, and its position is persisted.
-
-Requires PySide6 + pyqtgraph at runtime (not needed for the unit tests).
+A glassy rounded card with a soft drop shadow, a subtle brand bar, a large
+primary readout, the hand-painted :class:`Sparkline` hero graph, and a stack of
+sleek per-metric bars. Draggable anywhere, snaps to screen edges, remembers its
+position.
 """
 
 from __future__ import annotations
@@ -13,75 +11,128 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
-import pyqtgraph as pg
 
 from .config import Config
 from .history import History
-from .metrics import MetricsSampler, Sample, color_for_level
+from .metrics import Metric, MetricsSampler, color_for_level
+from .sparkline import Sparkline
 
-# Theme palettes: (panel bg, text, muted text, graph bg, grid)
+# Theme palette. Each entry drives the card gradient, borders and text.
 _THEMES = {
-    "dark": {
-        "panel": (22, 24, 30, 235),
-        "text": "#f2f4f8",
-        "muted": "#9aa4b2",
-        "graph_bg": (14, 16, 22),
-        "border": "#2a2e38",
+    "midnight": {
+        "top": (26, 29, 42), "bottom": (14, 15, 23),
+        "border": (255, 255, 255, 26), "inner": (255, 255, 255, 20),
+        "text": "#eef1f7", "muted": "#8b93a7", "track": (255, 255, 255, 22),
+        "grid": (255, 255, 255, 16), "brand": "#6f7be0",
+    },
+    "graphite": {
+        "top": (44, 46, 52), "bottom": (26, 27, 31),
+        "border": (255, 255, 255, 26), "inner": (255, 255, 255, 18),
+        "text": "#f2f3f5", "muted": "#9aa0ab", "track": (255, 255, 255, 22),
+        "grid": (255, 255, 255, 14), "brand": "#8a93a6",
     },
     "light": {
-        "panel": (245, 246, 250, 240),
-        "text": "#1c1f26",
-        "muted": "#5b6473",
-        "graph_bg": (255, 255, 255),
-        "border": "#d6dae2",
+        "top": (252, 253, 255), "bottom": (238, 241, 248),
+        "border": (10, 20, 40, 40), "inner": (255, 255, 255, 220),
+        "text": "#1b2030", "muted": "#5b6473", "track": (10, 20, 40, 28),
+        "grid": (10, 20, 40, 18), "brand": "#4954c9",
     },
 }
 
-_DRAG_MARGIN = 24  # px from a screen edge to trigger snap
+_MARGIN = 18       # room around the card for the drop shadow
+_DRAG_SNAP = 22    # px from a screen edge to trigger snap
+
+
+def _qcolor(rgb) -> QtGui.QColor:
+    return QtGui.QColor(*rgb)
+
+
+class MiniBar(QtWidgets.QWidget):
+    """A thin rounded progress bar with a gradient fill coloured by level."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._pct = 0.0
+        self._color = QtGui.QColor("#3ddc84")
+        self._track = QtGui.QColor(255, 255, 255, 22)
+        self.setFixedHeight(6)
+        self.setMinimumWidth(40)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
+                           QtWidgets.QSizePolicy.Fixed)
+
+    def set_value(self, pct: float, color: str, track: QtGui.QColor) -> None:
+        self._pct = max(0.0, min(100.0, pct))
+        self._color = QtGui.QColor(color)
+        self._track = track
+        self.update()
+
+    def paintEvent(self, _e) -> None:
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        r = self.rect().adjusted(0, 0, -1, -1)
+        radius = r.height() / 2.0
+        p.setPen(QtCore.Qt.NoPen)
+        p.setBrush(self._track)
+        p.drawRoundedRect(r, radius, radius)
+        if self._pct <= 0:
+            return
+        fw = max(r.height(), r.width() * self._pct / 100.0)
+        fill = QtCore.QRectF(r.x(), r.y(), fw, r.height())
+        grad = QtGui.QLinearGradient(fill.left(), 0, fill.right(), 0)
+        c0 = QtGui.QColor(self._color)
+        c0.setAlpha(180)
+        grad.setColorAt(0.0, c0)
+        grad.setColorAt(1.0, self._color)
+        p.setBrush(QtGui.QBrush(grad))
+        p.drawRoundedRect(fill, radius, radius)
 
 
 class MetricRow(QtWidgets.QWidget):
-    """A single metric line: label, coloured percent, and used/total text."""
+    """One metric line: label · mini bar · muted detail · bold value."""
 
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        layout = QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-
+        lay = QtWidgets.QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(9)
         self.label = QtWidgets.QLabel("—")
-        self.label.setObjectName("metricLabel")
-        self.pct = QtWidgets.QLabel("0%")
-        self.pct.setObjectName("metricPct")
-        self.pct.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        self.label.setObjectName("rowLabel")
+        self.label.setFixedWidth(66)
+        self.bar = MiniBar()
         self.detail = QtWidgets.QLabel("")
-        self.detail.setObjectName("metricDetail")
+        self.detail.setObjectName("rowDetail")
         self.detail.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        self.value = QtWidgets.QLabel("0%")
+        self.value.setObjectName("rowValue")
+        self.value.setFixedWidth(52)
+        self.value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        lay.addWidget(self.label)
+        lay.addWidget(self.bar, 1)
+        lay.addWidget(self.detail)
+        lay.addWidget(self.value)
 
-        layout.addWidget(self.label)
-        layout.addStretch(1)
-        layout.addWidget(self.detail)
-        layout.addWidget(self.pct)
-
-    def update_reading(self, reading, amber: int, red: int) -> None:
-        self.label.setText(reading.label)
-        if reading.available:
-            level = reading.level(amber, red)
+    def update_metric(self, m: Metric, cfg: Config, track: QtGui.QColor) -> None:
+        self.label.setText(m.label)
+        if m.available:
+            level = m.level(cfg.threshold_amber, cfg.threshold_red,
+                            cfg.temp_amber, cfg.temp_red)
             color = color_for_level(level)
-            self.pct.setText(f"{reading.percent:.0f}%")
-            self.pct.setStyleSheet(f"color: {color}; font-weight: 600;")
-            self.detail.setText(reading.readout())
+            self.bar.show()
+            self.bar.set_value(m.pct, color, track)
+            self.detail.setText(m.sub_text())
+            self.value.setText(m.value_text())
+            self.value.setStyleSheet(f"color:{color};")
         else:
-            self.pct.setText("n/a")
-            self.pct.setStyleSheet("color: #6b7280;")
-            self.detail.setText(reading.detail or "")
+            self.bar.hide()
+            self.detail.setText(m.detail or "")
+            self.value.setText("n/a")
+            self.value.setStyleSheet("color:#6b7280;")
 
 
 class MemGraphWidget(QtWidgets.QWidget):
-    """Frameless draggable panel with a live graph and metric rows."""
-
     request_settings = QtCore.Signal()
     request_quit = QtCore.Signal()
+    request_hide = QtCore.Signal()
 
     def __init__(self, config: Config, sampler: MetricsSampler,
                  on_move: Optional[Callable[[int, int], None]] = None) -> None:
@@ -91,62 +142,82 @@ class MemGraphWidget(QtWidgets.QWidget):
         self._on_move = on_move
         self._drag_offset: Optional[QtCore.QPoint] = None
         self.history = History(config.history_points)
+        self.rows: dict[str, MetricRow] = {}
 
         self.setWindowTitle("MemGraph")
         self._apply_window_flags()
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
-        self.setMinimumSize(200, 120)
-        self.resize(config.width, config.height)
+        self.setMinimumSize(260, 170)
+        self.resize(config.width + 2 * _MARGIN, config.height + 2 * _MARGIN)
 
         self._build_ui()
         self._apply_theme()
         self._restore_position()
 
-        self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-        self.customContextMenuRequested.connect(self._show_menu)
-
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self.tick)
         self._timer.start(config.refresh_ms)
-        self.tick()  # paint immediately instead of waiting one interval
+        self.tick()
 
-    # ------------------------------------------------------------------ #
-    # UI construction
     # ------------------------------------------------------------------ #
     def _build_ui(self) -> None:
-        root = QtWidgets.QVBoxLayout(self)
-        root.setContentsMargins(12, 10, 12, 10)
-        root.setSpacing(4)
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(_MARGIN, _MARGIN, _MARGIN, _MARGIN)
 
-        # Header: title + big percent
-        header = QtWidgets.QHBoxLayout()
-        self.title = QtWidgets.QLabel("Memory")
-        self.title.setObjectName("title")
-        self.big_pct = QtWidgets.QLabel("0%")
-        self.big_pct.setObjectName("bigPct")
-        self.big_pct.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-        header.addWidget(self.title)
-        header.addStretch(1)
-        header.addWidget(self.big_pct)
-        root.addLayout(header)
+        self.card = QtWidgets.QFrame()
+        self.card.setObjectName("card")
+        shadow = QtWidgets.QGraphicsDropShadowEffect(self.card)
+        shadow.setBlurRadius(38)
+        shadow.setOffset(0, 10)
+        shadow.setColor(QtGui.QColor(0, 0, 0, 170))
+        self.card.setGraphicsEffect(shadow)
+        outer.addWidget(self.card)
 
-        # Live graph
-        self.plot = pg.PlotWidget()
-        self.plot.setMenuEnabled(False)
-        self.plot.setMouseEnabled(x=False, y=False)
-        self.plot.hideButtons()
-        self.plot.setYRange(0, 100, padding=0)
-        self.plot.getAxis("left").setWidth(24)
-        self.plot.getAxis("bottom").hide()
-        self.plot.setLabel("left", "")
-        self.curve = self.plot.plot([], [], fillLevel=0, antialias=True)
-        root.addWidget(self.plot, stretch=1)
+        card = QtWidgets.QVBoxLayout(self.card)
+        card.setContentsMargins(18, 14, 18, 16)
+        card.setSpacing(8)
 
-        # Metric rows
-        self.rows: dict[str, MetricRow] = {}
-        self.rows_container = QtWidgets.QVBoxLayout()
-        self.rows_container.setSpacing(2)
-        root.addLayout(self.rows_container)
+        # Brand bar: wordmark + menu button.
+        top = QtWidgets.QHBoxLayout()
+        top.setSpacing(6)
+        self.brand = QtWidgets.QLabel("● MEMGRAPH")
+        self.brand.setObjectName("brand")
+        self.menu_btn = QtWidgets.QToolButton()
+        self.menu_btn.setObjectName("menuBtn")
+        self.menu_btn.setText("⋯")
+        self.menu_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.menu_btn.clicked.connect(self._open_menu)
+        top.addWidget(self.brand)
+        top.addStretch(1)
+        top.addWidget(self.menu_btn)
+        card.addLayout(top)
+
+        # Hero: primary label + big value.
+        hero = QtWidgets.QHBoxLayout()
+        self.hero_label = QtWidgets.QLabel("MEMORY")
+        self.hero_label.setObjectName("heroLabel")
+        self.hero_value = QtWidgets.QLabel("0%")
+        self.hero_value.setObjectName("heroValue")
+        self.hero_value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        hero.addWidget(self.hero_label)
+        hero.addStretch(1)
+        hero.addWidget(self.hero_value)
+        card.addLayout(hero)
+
+        # Sparkline hero graph.
+        self.spark = Sparkline()
+        card.addWidget(self.spark, 1)
+
+        # Divider.
+        self.divider = QtWidgets.QFrame()
+        self.divider.setObjectName("divider")
+        self.divider.setFixedHeight(1)
+        card.addWidget(self.divider)
+
+        # Metric rows container.
+        self.rows_box = QtWidgets.QVBoxLayout()
+        self.rows_box.setSpacing(7)
+        card.addLayout(self.rows_box)
 
     def _apply_window_flags(self) -> None:
         flags = QtCore.Qt.FramelessWindowHint | QtCore.Qt.Tool
@@ -155,148 +226,148 @@ class MemGraphWidget(QtWidgets.QWidget):
         self.setWindowFlags(flags)
 
     def _apply_theme(self) -> None:
-        t = _THEMES.get(self.cfg.theme, _THEMES["dark"])
+        t = _THEMES.get(self.cfg.theme, _THEMES["midnight"])
         self._theme = t
         self.setWindowOpacity(self.cfg.opacity)
-        pr, pg_, pb, pa = t["panel"]
+        self.spark.set_grid_color(_qcolor(t["grid"]))
+        self.spark.setVisible(self.cfg.show_sparkline)
         self.setStyleSheet(f"""
-            QWidget {{ color: {t['text']}; font-family: 'Segoe UI', sans-serif; }}
-            #title {{ font-size: 12px; color: {t['muted']}; letter-spacing: 1px;
-                      text-transform: uppercase; }}
-            #bigPct {{ font-size: 26px; font-weight: 700; }}
-            #metricLabel {{ font-size: 11px; color: {t['muted']}; }}
-            #metricPct {{ font-size: 11px; }}
-            #metricDetail {{ font-size: 10px; color: {t['muted']}; }}
+            QLabel {{ color: {t['text']}; font-family: 'Segoe UI', sans-serif; }}
+            #brand {{ color: {t['brand']}; font-size: 10px; font-weight: 700;
+                      letter-spacing: 3px; }}
+            #menuBtn {{ color: {t['muted']}; font-size: 16px; font-weight: 700;
+                        border: none; background: transparent; padding: 0 4px; }}
+            #menuBtn:hover {{ color: {t['text']}; }}
+            #heroLabel {{ color: {t['muted']}; font-size: 12px; font-weight: 600;
+                          letter-spacing: 2px; }}
+            #heroValue {{ font-size: 34px; font-weight: 800; }}
+            #rowLabel {{ color: {t['muted']}; font-size: 11px; font-weight: 600; }}
+            #rowDetail {{ color: {t['muted']}; font-size: 10px; }}
+            #rowValue {{ font-size: 12px; font-weight: 700; }}
+            #divider {{ background: rgba(255,255,255,0.08); }}
         """)
-        self.plot.setBackground(t["graph_bg"])
-        self.update()  # repaint rounded panel
+        self.card.update()
+        self.update()
 
-    def paintEvent(self, event: QtGui.QPaintEvent) -> None:
-        """Draw the rounded translucent panel behind the child widgets."""
-        painter = QtGui.QPainter(self)
-        painter.setRenderHint(QtGui.QPainter.Antialiasing)
-        rect = self.rect().adjusted(1, 1, -1, -1)
-        r, g, b, a = self._theme["panel"]
-        painter.setBrush(QtGui.QColor(r, g, b, a))
-        pen = QtGui.QPen(QtGui.QColor(self._theme["border"]))
-        pen.setWidth(1)
-        painter.setPen(pen)
-        painter.drawRoundedRect(rect, 14, 14)
-        super().paintEvent(event)
+    def paintEvent(self, _e: QtGui.QPaintEvent) -> None:
+        # The card frame itself is painted here (so the drop-shadow effect on
+        # self.card composites correctly over the translucent top-level).
+        t = self._theme
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        rect = QtCore.QRectF(self.card.geometry())
+        grad = QtGui.QLinearGradient(rect.topLeft(), rect.bottomLeft())
+        grad.setColorAt(0.0, _qcolor(t["top"]))
+        grad.setColorAt(1.0, _qcolor(t["bottom"]))
+        p.setBrush(QtGui.QBrush(grad))
+        p.setPen(QtGui.QPen(_qcolor(t["border"]), 1.2))
+        p.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 18, 18)
+        # Inner top highlight for a glassy edge.
+        hl = QtGui.QPen(_qcolor(t["inner"]), 1.0)
+        p.setPen(hl)
+        p.drawLine(rect.left() + 14, rect.top() + 1.5,
+                   rect.right() - 14, rect.top() + 1.5)
 
-    # ------------------------------------------------------------------ #
-    # Live update
     # ------------------------------------------------------------------ #
     def tick(self) -> None:
-        sample = self.sampler.sample(
-            self.cfg.show_ram, self.cfg.show_vram,
-            self.cfg.show_process, self.cfg.process_name,
-        )
-        if sample is None:
-            self.big_pct.setText("—")
+        metrics = self.sampler.sample(self.cfg.enabled_metrics,
+                                      self.cfg.process_name)
+        if not metrics:
+            self.hero_value.setText("—")
             return
-        self._render_sample(sample)
-
-    def _render_sample(self, sample: Sample) -> None:
-        primary = sample.primary
-        pct = primary.percent if primary.available else 0.0
+        primary = metrics[0]
+        pct = primary.pct if primary.available else 0.0
         self.history.append(pct)
 
-        self.title.setText(primary.label)
-        level = primary.level(self.cfg.threshold_amber, self.cfg.threshold_red)
+        level = primary.level(self.cfg.threshold_amber, self.cfg.threshold_red,
+                              self.cfg.temp_amber, self.cfg.temp_red)
         color = color_for_level(level)
-        self.big_pct.setText(f"{pct:.0f}%" if primary.available else "n/a")
-        self.big_pct.setStyleSheet(f"color: {color}; font-weight: 700;")
+        self.hero_label.setText(primary.label.upper())
+        self.hero_value.setText(primary.value_text())
+        self.hero_value.setStyleSheet(f"color:{color};")
+        self.spark.set_data(self.history.values(), color)
 
-        ys = self.history.values()
-        xs = list(range(len(ys)))
-        fill = QtGui.QColor(color)
-        fill.setAlpha(70)
-        self.curve.setData(xs, ys, pen=pg.mkPen(color, width=2),
-                           fillLevel=0, brush=fill)
+        self._sync_rows(metrics)
 
-        self._sync_rows(sample.all_readings())
-
-    def _sync_rows(self, readings) -> None:
-        keys = [r.key for r in readings]
-        # Remove rows no longer shown
+    def _sync_rows(self, metrics: list[Metric]) -> None:
+        track = _qcolor(self._theme["track"])
+        keys = [m.key for m in metrics]
         for key in list(self.rows):
             if key not in keys:
                 w = self.rows.pop(key)
-                self.rows_container.removeWidget(w)
+                self.rows_box.removeWidget(w)
                 w.deleteLater()
-        # Add/update
-        for reading in readings:
-            row = self.rows.get(reading.key)
+        for m in metrics:
+            row = self.rows.get(m.key)
             if row is None:
-                row = MetricRow(self)
-                self.rows[reading.key] = row
-                self.rows_container.addWidget(row)
-            row.update_reading(reading, self.cfg.threshold_amber,
-                               self.cfg.threshold_red)
+                row = MetricRow(self.card)
+                self.rows[m.key] = row
+                self.rows_box.addWidget(row)
+            row.update_metric(m, self.cfg, track)
 
-    # ------------------------------------------------------------------ #
-    # Runtime reconfiguration (called after settings change)
     # ------------------------------------------------------------------ #
     def apply_config(self, cfg: Config) -> None:
         self.cfg = cfg
         self.history.resize(cfg.history_points)
         self._apply_window_flags()
-        self.show()  # re-show needed after changing window flags
+        self.show()
         self._apply_theme()
         self._timer.setInterval(cfg.refresh_ms)
         self.tick()
 
-    # ------------------------------------------------------------------ #
-    # Dragging + placement
-    # ------------------------------------------------------------------ #
-    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
-        if event.button() == QtCore.Qt.LeftButton:
-            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+    # -- dragging / placement ------------------------------------------ #
+    def mousePressEvent(self, e: QtGui.QMouseEvent) -> None:
+        if e.button() == QtCore.Qt.LeftButton:
+            self._drag_offset = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            e.accept()
 
-    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
-        if self._drag_offset is not None and event.buttons() & QtCore.Qt.LeftButton:
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
-            event.accept()
+    def mouseMoveEvent(self, e: QtGui.QMouseEvent) -> None:
+        if self._drag_offset is not None and e.buttons() & QtCore.Qt.LeftButton:
+            self.move(e.globalPosition().toPoint() - self._drag_offset)
+            e.accept()
 
-    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
+    def mouseReleaseEvent(self, e: QtGui.QMouseEvent) -> None:
         if self._drag_offset is not None:
             self._drag_offset = None
             if self.cfg.snap_to_edges:
                 self._snap_to_edge()
-            pos = self.pos()
             if self._on_move:
-                self._on_move(pos.x(), pos.y())
-            event.accept()
+                self._on_move(self.x(), self.y())
+            e.accept()
 
     def _snap_to_edge(self) -> None:
         screen = self.screen().availableGeometry()
         x, y = self.x(), self.y()
-        if abs(x - screen.left()) < _DRAG_MARGIN:
-            x = screen.left()
-        elif abs(screen.right() - (x + self.width())) < _DRAG_MARGIN:
-            x = screen.right() - self.width()
-        if abs(y - screen.top()) < _DRAG_MARGIN:
-            y = screen.top()
-        elif abs(screen.bottom() - (y + self.height())) < _DRAG_MARGIN:
-            y = screen.bottom() - self.height()
+        # Account for the transparent shadow margin so the card hugs the edge.
+        if abs(x + _MARGIN - screen.left()) < _DRAG_SNAP:
+            x = screen.left() - _MARGIN
+        elif abs(screen.right() - (x + self.width() - _MARGIN)) < _DRAG_SNAP:
+            x = screen.right() - self.width() + _MARGIN
+        if abs(y + _MARGIN - screen.top()) < _DRAG_SNAP:
+            y = screen.top() - _MARGIN
+        elif abs(screen.bottom() - (y + self.height() - _MARGIN)) < _DRAG_SNAP:
+            y = screen.bottom() - self.height() + _MARGIN
         self.move(x, y)
 
     def _restore_position(self) -> None:
         if self.cfg.pos_x >= 0 and self.cfg.pos_y >= 0:
             self.move(self.cfg.pos_x, self.cfg.pos_y)
         else:
-            # Default: top-right corner with a small margin.
             screen = QtWidgets.QApplication.primaryScreen().availableGeometry()
-            self.move(screen.right() - self.width() - 24, screen.top() + 24)
+            self.move(screen.right() - self.width() + _MARGIN - 12,
+                      screen.top() + 12 - _MARGIN + 24)
 
-    # ------------------------------------------------------------------ #
-    # Context menu
-    # ------------------------------------------------------------------ #
-    def _show_menu(self, pos: QtCore.QPoint) -> None:
+    def contextMenuEvent(self, e: QtGui.QContextMenuEvent) -> None:
+        self._popup(e.globalPos())
+
+    def _open_menu(self) -> None:
+        self._popup(self.menu_btn.mapToGlobal(
+            QtCore.QPoint(0, self.menu_btn.height())))
+
+    def _popup(self, global_pos: QtCore.QPoint) -> None:
         menu = QtWidgets.QMenu(self)
         menu.addAction("Settings…", self.request_settings.emit)
+        menu.addAction("Hide to tray", self.request_hide.emit)
         menu.addSeparator()
         menu.addAction("Quit MemGraph", self.request_quit.emit)
-        menu.exec(self.mapToGlobal(pos))
+        menu.exec(global_pos)
