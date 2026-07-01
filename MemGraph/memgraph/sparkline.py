@@ -17,9 +17,12 @@ class Sparkline(QtWidgets.QWidget):
         self._values: list[float] = []
         self._color = QtGui.QColor("#3ddc84")
         self._grid = QtGui.QColor(255, 255, 255, 16)
-        self.setMinimumHeight(70)
+        self.setMinimumHeight(78)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
-                           QtWidgets.QSizePolicy.Expanding)
+                           QtWidgets.QSizePolicy.Preferred)
+
+    def sizeHint(self) -> QtCore.QSize:
+        return QtCore.QSize(240, 88)
 
     def set_grid_color(self, color: QtGui.QColor) -> None:
         self._grid = color

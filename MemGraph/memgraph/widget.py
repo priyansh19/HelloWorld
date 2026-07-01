@@ -158,6 +158,7 @@ class MemGraphWidget(QtWidgets.QWidget):
         self._timer.timeout.connect(self.tick)
         self._timer.start(config.refresh_ms)
         self.tick()
+        self._fit_to_content()
 
     # ------------------------------------------------------------------ #
     def _build_ui(self) -> None:
@@ -288,6 +289,23 @@ class MemGraphWidget(QtWidgets.QWidget):
         self.spark.set_data(self.history.values(), color)
 
         self._sync_rows(metrics)
+        self._fit_to_content()
+
+    def _fit_to_content(self) -> None:
+        """Grow/shrink the window so every enabled metric row is visible.
+
+        The window is frameless and never auto-sizes, so when the user enables
+        more metrics we resize its height to the layout's preferred height.
+        Width stays at the configured value; the top-left corner is preserved.
+        """
+        lay = self.layout()
+        if lay is None:
+            return
+        lay.activate()
+        w = self.cfg.width + 2 * _MARGIN
+        h = self.sizeHint().height()
+        if self.width() != w or self.height() != h:
+            self.resize(w, h)
 
     def _sync_rows(self, metrics: list[Metric]) -> None:
         track = _qcolor(self._theme["track"])
