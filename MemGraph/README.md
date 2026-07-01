@@ -39,6 +39,14 @@ llama.cpp, LM Studio, …).
 > Windows SmartScreen may warn because the exe is unsigned — click
 > **More info → Run anyway**.
 
+### Updating
+
+To update, just download the latest `MemGraph-Setup.exe` and run it again. Setup
+detects the existing install, shows **Update**, stops the running widget,
+overwrites the files **in place** (same folder), and relaunches — no need to
+uninstall or delete anything first. Your settings
+(`%LOCALAPPDATA%\MemGraph\config.json`) are kept.
+
 ## Build it yourself (Windows)
 
 ```bat

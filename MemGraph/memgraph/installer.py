@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -56,6 +57,44 @@ def is_installed_copy() -> bool:
         return False
 
 
+def existing_install_dir() -> Path | None:
+    """Return the current install dir if MemGraph is already installed there."""
+    d = default_install_dir()
+    return d if (d / INSTALL_MARKER).exists() else None
+
+
+def _stop_running_widget() -> None:
+    """Ask any running installed widget to exit so its exe can be overwritten.
+
+    A running MemGraph.exe holds a lock on the file on Windows; stopping it
+    first lets an update overwrite the same files in place (no manual delete).
+    Best-effort and guarded — never fatal.
+    """
+    if not _is_windows():
+        return
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "MemGraph.exe"],
+                       check=False, creationflags=0x08000000)
+    except Exception:
+        pass
+
+
+def _copy_over(src: Path, dest: Path, attempts: int = 10,
+               delay: float = 0.4) -> None:
+    """Overwrite ``dest`` with ``src``, retrying while the file is still locked
+    (e.g. the previous version is shutting down)."""
+    last: Exception | None = None
+    for _ in range(attempts):
+        try:
+            shutil.copy2(src, dest)
+            return
+        except (PermissionError, OSError) as exc:
+            last = exc
+            time.sleep(delay)
+    if last is not None:
+        raise last
+
+
 def _make_shortcut(lnk: Path, target: Path, args: str, workdir: Path) -> None:
     """Create a .lnk via the WScript.Shell COM object (no extra deps)."""
     if not _is_windows():
@@ -84,7 +123,12 @@ def perform_install(dest_dir: Path, autostart_on: bool,
 
     src = Path(sys.executable).resolve()
     if getattr(sys, "frozen", False) and src != installed_exe.resolve():
-        shutil.copy2(src, installed_exe)
+        # Update-in-place: stop the running widget (if any) so we can overwrite
+        # the same file, then copy with retries while the lock clears. User
+        # settings live elsewhere (%LOCALAPPDATA%\MemGraph) and are untouched.
+        if installed_exe.exists():
+            _stop_running_widget()
+        _copy_over(src, installed_exe)
     elif not getattr(sys, "frozen", False):
         # Running from source: nothing to copy; point launchers at the module.
         installed_exe = src  # the python interpreter
@@ -121,7 +165,10 @@ class InstallerWindow(QtWidgets.QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("MemGraph Setup")
+        self._existing = existing_install_dir()
+        self._update = self._existing is not None
+        self.setWindowTitle("MemGraph Setup — Update" if self._update
+                            else "MemGraph Setup")
         self.setFixedSize(640, 560)
         self._installed_exe: Path | None = None
         self._done = False
@@ -217,7 +264,8 @@ class InstallerWindow(QtWidgets.QWidget):
         lbl = QtWidgets.QLabel("Install to")
         lbl.setObjectName("locLabel")
         lbl.setFixedWidth(66)
-        self.path_edit = QtWidgets.QLineEdit(str(default_install_dir()))
+        self.path_edit = QtWidgets.QLineEdit(
+            str(self._existing or default_install_dir()))
         self.path_edit.setObjectName("pathEdit")
         browse = QtWidgets.QPushButton("Browse…")
         browse.setObjectName("browse")
@@ -246,9 +294,12 @@ class InstallerWindow(QtWidgets.QWidget):
         wrap = QtWidgets.QWidget()
         lay = QtWidgets.QHBoxLayout(wrap)
         lay.setContentsMargins(0, 0, 0, 0)
-        self.status = QtWidgets.QLabel("")
+        self.status = QtWidgets.QLabel(
+            "Existing install detected — this will update it in place."
+            if self._update else "")
         self.status.setObjectName("status")
-        self.install_btn = QtWidgets.QPushButton("Install")
+        self.install_btn = QtWidgets.QPushButton("Update" if self._update
+                                                 else "Install")
         self.install_btn.setObjectName("install")
         self.install_btn.setFixedHeight(40)
         self.install_btn.setMinimumWidth(150)
@@ -270,7 +321,7 @@ class InstallerWindow(QtWidgets.QWidget):
             self._launch_and_close()
             return
         self.install_btn.setEnabled(False)
-        self.status.setText("Installing…")
+        self.status.setText("Updating…" if self._update else "Installing…")
         QtWidgets.QApplication.processEvents()
         try:
             self._installed_exe = perform_install(
@@ -279,13 +330,15 @@ class InstallerWindow(QtWidgets.QWidget):
                 self.chk_desktop.isChecked(),
             )
             self._done = True
-            self.status.setText("✓  Installed successfully")
+            self.status.setText("✓  Updated successfully" if self._update
+                                else "✓  Installed successfully")
             self.install_btn.setText("Launch MemGraph")
             self.install_btn.setEnabled(True)
             if not self.chk_launch.isChecked():
                 self.install_btn.setText("Finish")
         except Exception as exc:  # pragma: no cover - platform specific
-            self.status.setText(f"Install failed: {exc}")
+            verb = "Update" if self._update else "Install"
+            self.status.setText(f"{verb} failed: {exc}")
             self.install_btn.setEnabled(True)
 
     def _launch_and_close(self) -> None:
