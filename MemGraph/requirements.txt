@@ -1,0 +1,7 @@
+# Runtime dependencies for the MemGraph widget.
+PySide6>=6.6
+pyqtgraph>=0.13
+psutil>=5.9
+# NVIDIA VRAM support (optional at runtime; import name is `pynvml`).
+# On non-NVIDIA machines the widget degrades gracefully and simply hides VRAM.
+nvidia-ml-py>=12.535

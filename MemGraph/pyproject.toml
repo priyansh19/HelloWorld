@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "memgraph"
+version = "1.0.0"
+description = "Lightweight Windows desktop widget for monitoring memory while running local LLMs"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6>=6.6",
+    "pyqtgraph>=0.13",
+    "psutil>=5.9",
+    "nvidia-ml-py>=12.535",
+]
+
+[project.scripts]
+memgraph = "memgraph.app:main"
+
+[tool.setuptools]
+packages = ["memgraph"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

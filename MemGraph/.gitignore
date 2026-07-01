@@ -1,0 +1,18 @@
+# Re-include our requirements files (root .gitignore ignores *.txt globally).
+!requirements.txt
+!requirements-dev.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# PyInstaller
+build/
+dist/
+*.manifest
+
+# Test / tooling
+.pytest_cache/

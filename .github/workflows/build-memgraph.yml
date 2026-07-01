@@ -1,0 +1,51 @@
+name: Build MemGraph (Windows)
+
+# Builds the widget on a real Windows runner, runs the tests, and publishes
+# MemGraph.exe as a downloadable artifact. Triggers on changes under MemGraph/
+# and can be run on demand from the Actions tab.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "MemGraph/**"
+      - ".github/workflows/build-memgraph.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: MemGraph
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Build executable
+        run: pyinstaller --noconfirm MemGraph.spec
+
+      - name: Upload MemGraph.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: MemGraph-windows
+          path: MemGraph/dist/MemGraph.exe
+          if-no-files-found: error

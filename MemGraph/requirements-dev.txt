@@ -1,0 +1,4 @@
+# Development & packaging dependencies (superset of runtime).
+-r requirements.txt
+pytest>=8.0
+pyinstaller>=6.3
