@@ -1,72 +1,45 @@
-# Hello World :smile:
+<h1 align="center">MemGraph</h1>
 
-Hello World, this repository is made for fun. It aims to collaborate with various developers specialized in different programming languages to contribute Hello World code in their specialized language in this repository.
+<p align="center">
+  A lightweight, professional Windows desktop widget that shows your system
+  memory — plus CPU, GPU, NPU and temperatures — as a live, hand-painted graph.
+  Purpose-built for keeping an eye on memory pressure while running local LLMs.
+</p>
 
-# Rules for collaboration
+<p align="center">
+  <img src="MemGraph/assets/screenshot-widget.png" width="360" alt="MemGraph widget">
+</p>
 
-1. Create folder of programming language you are coding on.
-2. Update Readme.md with relative link to your code file.
-3. Never work on the master branch.
+## ⬇️ Download
 
-# How to Collaborate:
+**[Download MemGraph-Setup.exe »](https://github.com/priyansh19/HelloWorld/releases/download/memgraph-latest/MemGraph-Setup.exe)**
 
-1. Fork the repository to your own GitHub account.
+Run it, follow the setup wizard, and the widget installs itself (no admin
+rights). Windows SmartScreen may warn because the exe is unsigned — click
+**More info → Run anyway**.
 
-2. Clone the repository to your local machine
-```
-$ git clone "https://www.github.com/{Username}/HelloWorld.git"
-```
-where username is your GitHub account username.
+## Features
 
-3. Create a branch where you can do your local work.
-Never work on **master** branch as we do not allow master commits except by admins.
-```
-$ git branch {branchname}
-$ git checkout branchname
-```
+- 📈 **Custom-painted live graph** — smooth curve with a gradient glow, no clutter
+- 🧠 **Built for local LLMs** — track RAM, GPU VRAM and your model process (Ollama, llama.cpp, LM Studio)
+- 🧩 **Customisable metrics** — RAM, CPU, GPU, NPU, process memory and CPU/GPU/memory temperatures
+- 🎨 Frameless, glassy, drop-shadowed panel with 3 themes — drag anywhere, snaps to edges
+- 🔒 **Single instance**, 🚀 **modern setup wizard**, **autostart at login**, system-tray icon
+- 🪶 Tiny footprint — a memory monitor that doesn't hog memory
 
-4. Do your work and stage your changes.
-```
-$ git add <filename>
-```
+| Themes | Setup wizard |
+|---|---|
+| <img src="MemGraph/assets/screenshot-graphite.png" width="320"> | <img src="MemGraph/assets/screenshot-setup.png" width="320"> |
 
-5. Commit you changes with a commit message containing your name, file(s) worked upon, changes added.
-```
-$ git commit -m "Name| files| Changes"
-```
+## Documentation & source
 
-6. Push changes to your forked repository
-```
-$ git push -u origin branchname
-```
+The full application, build instructions and architecture live in
+**[`MemGraph/`](MemGraph/)** — see [MemGraph/README.md](MemGraph/README.md).
 
-# Synchronize forked repository with Upstream repository
+Builds are produced automatically on a Windows CI runner and published to the
+[`memgraph-latest`](https://github.com/priyansh19/HelloWorld/releases/tag/memgraph-latest)
+release.
 
-1. Create upstream as our repository
-```
-$ git remote add upstream "https://www.github.com/NishkarshRaj/HelloWorld"
-```
+## License
 
-2. Fetch upstream changes in local machine
-```
-$ git fetch upstream
-```
-
-3. Switch to master branch
-```
-$ git checkout master
-```
-
-4. Merge changes in local machine
-```
-$ git merge upstream/master
-```
-
-5. Push changes to your forked GitHub repository
-```
-$ git push -f origin master
-```
-
-# License
-
-[MIT License](LICENSE)
+[MIT](LICENSE)
