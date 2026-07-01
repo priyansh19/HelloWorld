@@ -215,6 +215,9 @@ class MemGraphWidget(QtWidgets.QWidget):
         outer = QtWidgets.QHBoxLayout(self)
         outer.setContentsMargins(_MARGIN, _MARGIN, _MARGIN, _MARGIN)
         outer.setSpacing(0)
+        # Let Qt size the (frameless) window exactly to its content — deterministic
+        # across platforms, so metric rows are never clipped.
+        outer.setSizeConstraint(QtWidgets.QLayout.SetFixedSize)
 
         self.tab = SideTab()
         self.tab.clicked.connect(self._toggle_peek)
@@ -280,6 +283,7 @@ class MemGraphWidget(QtWidgets.QWidget):
         self._theme = t
         comp = self.cfg.compact
         self.setWindowOpacity(self.cfg.opacity)
+        self.card.setFixedWidth(self.cfg.width)  # deterministic width
         self.spark.set_grid_color(_qcolor(t["grid"]))
         self.spark.setVisible(self.cfg.show_sparkline)
         self.spark.set_height(52 if comp else 84)
@@ -353,17 +357,15 @@ class MemGraphWidget(QtWidgets.QWidget):
         self._fit_to_content()
 
     def _fit_to_content(self) -> None:
+        # The window size is now managed by the layout's SetFixedSize constraint,
+        # so it always hugs its content. We only keep the peek panel docked to the
+        # edge after a size change (and never while a slide is animating).
         lay = self.layout()
-        if lay is None:
-            return
-        lay.activate()
-        peek = self.cfg.mode == "peek"
-        w = self.cfg.width + (_TAB_W if peek else 2 * _MARGIN)
-        h = self.sizeHint().height()
-        if abs(self.width() - w) > 1 or abs(self.height() - h) > 2:
-            self.resize(w, h)
-            if peek:
-                self._redock(animate=False)
+        if lay is not None:
+            lay.activate()
+        if self.cfg.mode == "peek" and \
+                self._anim.state() != QtCore.QAbstractAnimation.Running:
+            self._redock(animate=False)
 
     def _sync_rows(self, metrics: list[Metric]) -> None:
         track = _qcolor(self._theme["track"])
