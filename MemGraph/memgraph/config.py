@@ -59,7 +59,7 @@ class Config:
 
     # Display mode: "pinned" stays on screen; "peek" hides at the right edge as
     # a slim tab that slides out on click and auto-hides after peek_seconds.
-    mode: str = "pinned"           # "pinned" | "peek"
+    mode: str = "peek"             # "pinned" | "peek" (peek is the default)
     peek_seconds: int = 120
 
     # Colour thresholds (percent) for usage/memory metrics.

@@ -195,6 +195,7 @@ class MemGraphWidget(QtWidgets.QWidget):
         self._anim = QtCore.QPropertyAnimation(self, b"pos", self)
         self._anim.setDuration(150)
         self._anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
+        self._anim.finished.connect(self._on_anim_finished)
         self._peek_timer = QtCore.QTimer(self)
         self._peek_timer.setSingleShot(True)
         self._peek_timer.timeout.connect(self._peek_hide)
@@ -221,11 +222,9 @@ class MemGraphWidget(QtWidgets.QWidget):
 
         self.card = QtWidgets.QFrame()
         self.card.setObjectName("card")
-        shadow = QtWidgets.QGraphicsDropShadowEffect(self.card)
-        shadow.setBlurRadius(34)
-        shadow.setOffset(0, 8)
-        shadow.setColor(QtGui.QColor(0, 0, 0, 170))
-        self.card.setGraphicsEffect(shadow)
+        # NB: no QGraphicsDropShadowEffect — on a translucent frameless window it
+        # forces a slow software-composited repaint that makes the peek slide
+        # janky. The shadow is painted cheaply in paintEvent instead.
         outer.addWidget(self.card, 1)
 
         self.card_layout = QtWidgets.QVBoxLayout(self.card)
@@ -312,6 +311,15 @@ class MemGraphWidget(QtWidgets.QWidget):
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         rect = QtCore.QRectF(self.card.geometry())
+
+        # Cheap painted shadow (only runs on repaint, not while sliding).
+        p.setPen(QtCore.Qt.NoPen)
+        for i, alpha in enumerate((26, 16, 9, 4)):
+            grow = (i + 1) * 2.5
+            p.setBrush(QtGui.QColor(0, 0, 0, alpha))
+            p.drawRoundedRect(
+                rect.adjusted(-grow, -grow + 4, grow, grow + 4), 18, 18)
+
         grad = QtGui.QLinearGradient(rect.topLeft(), rect.bottomLeft())
         grad.setColorAt(0.0, _qcolor(t["top"]))
         grad.setColorAt(1.0, _qcolor(t["bottom"]))
@@ -423,10 +431,20 @@ class MemGraphWidget(QtWidgets.QWidget):
             self.move(target)
 
     def _animate_to(self, target: QtCore.QPoint) -> None:
+        if self.pos() == target:
+            return
+        # Pause metric refresh during the slide so nothing repaints/resizes the
+        # window mid-transition (keeps the animation buttery).
+        self._timer.stop()
         self._anim.stop()
         self._anim.setStartValue(self.pos())
         self._anim.setEndValue(target)
         self._anim.start()
+
+    def _on_anim_finished(self) -> None:
+        if not self._timer.isActive():
+            self._timer.start(self.cfg.refresh_ms)
+            self.tick()
 
     def _toggle_peek(self) -> None:
         if self._peek_open:
