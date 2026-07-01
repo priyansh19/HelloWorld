@@ -2,3 +2,5 @@
 -r requirements.txt
 pytest>=8.0
 pyinstaller>=6.3
+# In-process temperature reading via LibreHardwareMonitorLib (Windows build).
+pythonnet>=3.0

@@ -40,6 +40,21 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
+      # Fetch LibreHardwareMonitorLib + HidSharp so temps can be read in-process.
+      # Non-fatal: if it fails, the app falls back to the WMI/ACPI reader.
+      - name: Fetch sensor DLLs
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p lhm
+          curl -sL -o lhm.zip https://www.nuget.org/api/v2/package/LibreHardwareMonitorLib/0.9.4
+          curl -sL -o hid.zip https://www.nuget.org/api/v2/package/HidSharp/2.1.0
+          unzip -o -q lhm.zip -d lhm_pkg
+          unzip -o -q hid.zip -d hid_pkg
+          cp lhm_pkg/lib/net472/LibreHardwareMonitorLib.dll lhm/ || true
+          cp hid_pkg/lib/net472/HidSharp.dll lhm/ || true
+          ls -la lhm
+
       - name: Build executable
         run: pyinstaller --noconfirm MemGraph.spec
 

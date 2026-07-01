@@ -42,6 +42,7 @@ class MemGraphApp:
         self.widget.request_quit.connect(self.quit)
         self.widget.request_hide.connect(self.widget.hide)
         self.widget.request_mode.connect(self.set_mode)
+        self.widget.request_admin.connect(self.relaunch_elevated)
 
         self.tray = Tray(self.qapp)
         self.tray.toggle_visibility.connect(self.toggle_widget)
@@ -72,6 +73,26 @@ class MemGraphApp:
         save_config(self.cfg)
         self.widget.apply_config(self.cfg)
 
+    def relaunch_elevated(self) -> None:
+        """Relaunch MemGraph with administrator rights so the sensor driver can
+        load and read CPU / motherboard / memory temperatures. No-op unless on
+        Windows; if the user declines the UAC prompt, the current instance stays.
+        """
+        if not sys.platform.startswith("win"):
+            return
+        try:
+            import ctypes
+            if getattr(sys, "frozen", False):
+                exe, params = sys.executable, "--widget --takeover"
+            else:
+                exe, params = sys.executable, "-m memgraph --widget --takeover"
+            rc = ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", exe, params, None, 1)
+            if int(rc) > 32:            # success -> elevated instance launching
+                self.quit()
+        except Exception:
+            pass
+
     def toggle_widget(self) -> None:
         if self.widget.isVisible():
             self.widget.hide()
@@ -101,14 +122,20 @@ class MemGraphApp:
         return self.qapp.exec()
 
 
-def _run_widget() -> int:
-    app = MemGraphApp()
-    guard = SingleInstance(app.qapp)
+def _run_widget(takeover: bool = False) -> int:
+    qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    guard = SingleInstance(qapp)
     if not guard.is_primary:
-        # Another instance is already running: surface it and bail out.
-        guard.ping_primary()
-        return 0
-    guard.start_server(app.surface)
+        if takeover:
+            # An elevated relaunch: ask the running instance to exit, then claim
+            # the slot so this (admin) instance becomes the single instance.
+            guard.request_quit_primary()
+            guard.try_become_primary()
+        else:
+            guard.ping_primary()   # surface the running instance, then exit
+            return 0
+    app = MemGraphApp()
+    guard.start_server(app.surface, on_quit=app.quit)
     app._guard = guard  # keep a reference alive
     return app.run()
 
@@ -118,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     if "--setup" in argv or "--install" in argv:
         return run_installer()
     if "--widget" in argv or "--run" in argv:
-        return _run_widget()
+        return _run_widget(takeover="--takeover" in argv)
     # No explicit mode: installed copies run the widget, otherwise show setup.
     if is_installed_copy():
         return _run_widget()

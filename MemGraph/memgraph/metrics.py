@@ -153,15 +153,34 @@ class MetricsSampler:
         self._npu = None            # PerfCounter | None
         self._gpu_engine = None     # PerfCounter fallback | None
         self._wtemps = None         # WinTemps | None (lazy)
+        self._lhm = None            # LhmReader | None (lazy)
         self._init_psutil()
         self._init_nvml()
 
     def _win_temps(self):
-        """Lazily start the Windows temperature poller (no-op off Windows)."""
+        """Lazily start the Windows WMI/ACPI temperature poller."""
         if self._wtemps is None:
             from ._wintemp import WinTemps
             self._wtemps = WinTemps()
         return self._wtemps
+
+    def _lhm_reader(self):
+        """Lazily start the in-process LibreHardwareMonitor reader."""
+        if self._lhm is None:
+            from ._lhm import LhmReader
+            self._lhm = LhmReader()
+        return self._lhm
+
+    def _best_temp(self, key: str):
+        """Return (value, source) for a temp key, preferring the built-in
+        LibreHardwareMonitor reader, then the WMI/ACPI poller."""
+        lhm = self._lhm_reader().get()
+        if lhm.get(key) is not None:
+            return lhm[key], lhm.get("source", "")
+        wt = self._win_temps().get()
+        if wt.get(key) is not None:
+            return wt[key], wt.get("source", "")
+        return None, ""
 
     # -- backend init -------------------------------------------------- #
     def _init_psutil(self) -> None:
@@ -311,11 +330,10 @@ class MetricsSampler:
         t = self._sensor_temp("coretemp", "k10temp", "cpu", "acpitz", "zenpower")
         source = ""
         if t is None:
-            wt = self._win_temps().get()
-            t, source = wt.get("cpu"), wt.get("source", "")
+            t, source = self._best_temp("cpu")
         if t is None:
             return Metric("cpu_temp", "CPU Temp", "temp", available=False,
-                          detail="no sensor")
+                          detail="needs admin/sensor")
         return Metric("cpu_temp", "CPU Temp", "temp", float(t), detail=source)
 
     def gpu_temp(self) -> Metric:
@@ -327,10 +345,9 @@ class MetricsSampler:
                               detail=self.gpu_name())
             except Exception:
                 pass
-        wt = self._win_temps().get()
-        if wt.get("gpu") is not None:
-            return Metric("gpu_temp", "GPU Temp", "temp", float(wt["gpu"]),
-                          detail=wt.get("source", ""))
+        t, source = self._best_temp("gpu")
+        if t is not None:
+            return Metric("gpu_temp", "GPU Temp", "temp", float(t), detail=source)
         return Metric("gpu_temp", "GPU Temp", "temp", available=False,
                       detail="no sensor")
 
@@ -338,8 +355,7 @@ class MetricsSampler:
         t = self._sensor_temp("dimm", "spd", "mem", "ddr")
         source = ""
         if t is None:
-            wt = self._win_temps().get()
-            t, source = wt.get("mem"), wt.get("source", "")
+            t, source = self._best_temp("mem")
         if t is None:
             return Metric("mem_temp", "Mem Temp", "temp", available=False,
                           detail="no sensor")

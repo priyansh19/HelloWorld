@@ -175,6 +175,7 @@ class MemGraphWidget(QtWidgets.QWidget):
     request_quit = QtCore.Signal()
     request_hide = QtCore.Signal()
     request_mode = QtCore.Signal(str)
+    request_admin = QtCore.Signal()
 
     def __init__(self, config: Config, sampler: MetricsSampler,
                  on_move: Optional[Callable[[int, int], None]] = None) -> None:
@@ -540,6 +541,8 @@ class MemGraphWidget(QtWidgets.QWidget):
         a_peek.triggered.connect(lambda: self.request_mode.emit("peek"))
         menu.addSeparator()
         menu.addAction("Settings…", self.request_settings.emit)
+        menu.addAction("Enable full temperatures (admin)…",
+                       self.request_admin.emit)
         menu.addAction("Hide to tray", self.request_hide.emit)
         menu.addSeparator()
         menu.addAction("Quit MemGraph", self.request_quit.emit)

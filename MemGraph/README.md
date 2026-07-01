@@ -97,18 +97,26 @@ Anything a machine can't read shows a muted **`n/a`** row — nothing crashes.
 
 ### Temperatures on Windows
 
-Windows has no universal temperature API (`psutil` can't read temps there), so
-MemGraph reads them, best-effort, in this order:
+Windows has **no built-in temperature API** (`psutil` can't read temps there,
+and even Task Manager doesn't show CPU temp). MemGraph reads them itself,
+best-effort, in this order:
 
-1. **LibreHardwareMonitor** or **OpenHardwareMonitor** (both free) if running —
-   full coverage: CPU, GPU (any vendor) and memory/board temps. Just launch
-   either app in the background; MemGraph auto-detects it via WMI. **Recommended.**
-2. **Built-in ACPI thermal zone** — no extra software, but usually only a single
-   CPU/system temperature, and some desktops don't expose it.
+1. **Built-in reader** — `LibreHardwareMonitorLib` is bundled inside MemGraph and
+   read in-process (nothing for you to install or run). This covers CPU, GPU and
+   board/memory temps.
+2. **LibreHardwareMonitor / OpenHardwareMonitor via WMI** — if you happen to run
+   either app, it's auto-detected too.
+3. **ACPI thermal zone** — a last-resort CPU/system temperature.
 
-The temp row's muted label shows the source (`LibreHardwareMonitor`, `ACPI`, …).
-For NVIDIA GPUs, GPU temperature also comes directly from NVML with nothing to
-install.
+**Admin note:** GPU temperature usually reads without admin, but **CPU and
+motherboard/memory temperatures require a kernel driver that only loads with
+administrator rights**. Use the widget's ⋯ menu → **“Enable full temperatures
+(admin)”** to relaunch elevated (one UAC prompt) and those temps light up.
+
+**Memory temp:** many systems have **no memory-temperature sensor in hardware**
+(common except on some DDR5/enthusiast kits), so `Mem Temp` may stay `n/a` even
+when everything else works. For NVIDIA GPUs, GPU temperature also comes straight
+from NVML.
 
 ## Display modes
 

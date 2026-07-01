@@ -34,11 +34,13 @@ class SingleInstance(QtCore.QObject):
     def is_primary(self) -> bool:
         return self._primary
 
-    def start_server(self, on_activate: Callable[[], None]) -> None:
+    def start_server(self, on_activate: Callable[[], None],
+                     on_quit: Optional[Callable[[], None]] = None) -> None:
         """Primary instance: listen for pings from future launches."""
         if not self._primary:
             return
         self._on_activate = on_activate
+        self._on_quit = on_quit
         QtNetwork.QLocalServer.removeServer(_PIPE)
         self._server = QtNetwork.QLocalServer(self)
         self._server.newConnection.connect(self._on_new_connection)
@@ -50,21 +52,45 @@ class SingleInstance(QtCore.QObject):
         conn = self._server.nextPendingConnection()
         if conn is None:
             return
-        # We don't even need to read the payload — any connection means
-        # "another launch happened, please surface yourself".
-        if self._on_activate:
-            self._on_activate()
+        data = b""
+        if conn.waitForReadyRead(200):
+            data = bytes(conn.readAll())
         conn.disconnectFromServer()
+        # b"quit" hands off to an elevated relaunch; anything else = "surface".
+        if data.startswith(b"quit"):
+            if getattr(self, "_on_quit", None):
+                self._on_quit()
+        elif self._on_activate:
+            self._on_activate()
 
-    def ping_primary(self, timeout_ms: int = 500) -> bool:
-        """Secondary instance: tell the primary to show itself. Returns True
-        if the primary was reached."""
+    def _send(self, payload: bytes, timeout_ms: int) -> bool:
         sock = QtNetwork.QLocalSocket()
         sock.connectToServer(_PIPE)
         if not sock.waitForConnected(timeout_ms):
             return False
-        sock.write(_PING)
+        sock.write(payload)
         sock.flush()
         sock.waitForBytesWritten(timeout_ms)
         sock.disconnectFromServer()
         return True
+
+    def ping_primary(self, timeout_ms: int = 500) -> bool:
+        """Secondary instance: tell the primary to show itself."""
+        return self._send(_PING, timeout_ms)
+
+    def request_quit_primary(self, timeout_ms: int = 800) -> bool:
+        """Ask the running instance to exit (used before an elevated relaunch)."""
+        return self._send(b"quit", timeout_ms)
+
+    def try_become_primary(self, timeout_ms: int = 2500,
+                           step_ms: int = 100) -> bool:
+        """Retry claiming the shared segment until the old instance frees it."""
+        from PySide6 import QtCore
+        waited = 0
+        while waited < timeout_ms:
+            if self._shared.create(1):
+                self._primary = True
+                return True
+            QtCore.QThread.msleep(step_ms)
+            waited += step_ms
+        return self._primary

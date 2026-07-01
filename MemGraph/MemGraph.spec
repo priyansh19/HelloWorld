@@ -7,15 +7,36 @@ it shows the setup UI; once installed, the copied MemGraph.exe runs the widget.
 Build with:  pyinstaller --noconfirm MemGraph.spec
 """
 
+import glob
 import os
 
+from PyInstaller.utils.hooks import collect_all
+
 hiddenimports = ["pynvml", "PySide6.QtNetwork"]
+datas = []
+binaries = []
+
+# Bundle the LibreHardwareMonitor DLLs (fetched by CI into lhm/) so the app can
+# read CPU/GPU/memory temperatures in-process. If absent, the app falls back to
+# the WMI/ACPI reader.
+for dll in glob.glob("lhm/*.dll"):
+    datas.append((dll, "lhm"))
+
+# pythonnet / clr_loader must be fully collected for the frozen build.
+for pkg in ("pythonnet", "clr_loader"):
+    try:
+        d, b, h = collect_all(pkg)
+        datas += d
+        binaries += b
+        hiddenimports += h
+    except Exception:
+        pass
 
 a = Analysis(
     ["run.py"],
     pathex=[],
-    binaries=[],
-    datas=[],
+    binaries=binaries,
+    datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
