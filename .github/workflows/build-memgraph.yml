@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # needed to publish MemGraph.exe as a Release asset
 
 jobs:
   build:
@@ -43,9 +43,24 @@ jobs:
       - name: Build executable
         run: pyinstaller --noconfirm MemGraph.spec
 
-      - name: Upload MemGraph.exe
+      - name: Upload MemGraph.exe (Actions artifact)
         uses: actions/upload-artifact@v4
         with:
           name: MemGraph-windows
           path: MemGraph/dist/MemGraph.exe
           if-no-files-found: error
+
+      # Publish the exe as a Release asset so it has a stable, login-free
+      # direct-download URL:
+      #   https://github.com/<owner>/<repo>/releases/download/memgraph-latest/MemGraph.exe
+      - name: Publish MemGraph.exe to a GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Recreate a moving "memgraph-latest" release pointing at this commit.
+          gh release delete memgraph-latest --yes --cleanup-tag || true
+          gh release create memgraph-latest dist/MemGraph.exe \
+            --target "${{ github.sha }}" \
+            --title "MemGraph (latest build)" \
+            --notes "Standalone Windows build of the MemGraph memory widget. Download **MemGraph.exe** below and double-click to run — no install, no admin rights."
