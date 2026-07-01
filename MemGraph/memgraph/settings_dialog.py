@@ -139,6 +139,24 @@ class SettingsDialog(QtWidgets.QDialog):
     def _behaviour_tab(self) -> QtWidgets.QWidget:
         w = QtWidgets.QWidget()
         form = QtWidgets.QFormLayout(w)
+
+        self.combo_mode = QtWidgets.QComboBox()
+        self.combo_mode.addItem("Pinned (always visible)", "pinned")
+        self.combo_mode.addItem("Peek (slide-out tab, auto-hide)", "peek")
+        self.combo_mode.setCurrentIndex(1 if self._cfg.mode == "peek" else 0)
+        form.addRow("Display mode:", self.combo_mode)
+
+        self.spin_peek = QtWidgets.QSpinBox()
+        self.spin_peek.setRange(10, 600)
+        self.spin_peek.setSingleStep(10)
+        self.spin_peek.setSuffix(" s")
+        self.spin_peek.setValue(self._cfg.peek_seconds)
+        form.addRow("Auto-hide after:", self.spin_peek)
+
+        self.chk_compact = QtWidgets.QCheckBox("Compact layout")
+        self.chk_compact.setChecked(self._cfg.compact)
+        form.addRow(self.chk_compact)
+
         self.chk_ontop = QtWidgets.QCheckBox("Always on top")
         self.chk_ontop.setChecked(self._cfg.always_on_top)
         self.chk_snap = QtWidgets.QCheckBox("Snap to screen edges")
@@ -174,6 +192,9 @@ class SettingsDialog(QtWidgets.QDialog):
             threshold_red=self.spin_red.value(),
             temp_amber=self.spin_tamber.value(),
             temp_red=self.spin_tred.value(),
+            mode=self.combo_mode.currentData(),
+            peek_seconds=self.spin_peek.value(),
+            compact=self.chk_compact.isChecked(),
             always_on_top=self.chk_ontop.isChecked(),
             snap_to_edges=self.chk_snap.isChecked(),
             autostart=self.chk_autostart.isChecked(),

@@ -41,6 +41,7 @@ class MemGraphApp:
         self.widget.request_settings.connect(self.open_settings)
         self.widget.request_quit.connect(self.quit)
         self.widget.request_hide.connect(self.widget.hide)
+        self.widget.request_mode.connect(self.set_mode)
 
         self.tray = Tray(self.qapp)
         self.tray.toggle_visibility.connect(self.toggle_widget)
@@ -64,6 +65,12 @@ class MemGraphApp:
     def _on_move(self, x: int, y: int) -> None:
         self.cfg.pos_x, self.cfg.pos_y = x, y
         save_config(self.cfg)
+
+    def set_mode(self, mode: str) -> None:
+        self.cfg.mode = mode
+        self.cfg.clamp()
+        save_config(self.cfg)
+        self.widget.apply_config(self.cfg)
 
     def toggle_widget(self) -> None:
         if self.widget.isVisible():

@@ -55,6 +55,12 @@ class Config:
     accent: str = "auto"           # "auto" (level colour) | hex string
     snap_to_edges: bool = True
     show_sparkline: bool = True
+    compact: bool = True           # tighter paddings/fonts
+
+    # Display mode: "pinned" stays on screen; "peek" hides at the right edge as
+    # a slim tab that slides out on click and auto-hides after peek_seconds.
+    mode: str = "pinned"           # "pinned" | "peek"
+    peek_seconds: int = 120
 
     # Colour thresholds (percent) for usage/memory metrics.
     threshold_amber: int = 70
@@ -66,8 +72,8 @@ class Config:
     # Window placement (remembered). -1 => not yet placed.
     pos_x: int = -1
     pos_y: int = -1
-    width: int = 320
-    height: int = 232
+    width: int = 288
+    height: int = 220
 
     # Behaviour
     autostart: bool = True
@@ -91,9 +97,12 @@ class Config:
 
         if self.theme not in ("midnight", "graphite", "light"):
             self.theme = "midnight"
+        if self.mode not in ("pinned", "peek"):
+            self.mode = "pinned"
+        self.peek_seconds = _clamp_int(self.peek_seconds, 10, 600, 120)
 
-        self.width = _clamp_int(self.width, 240, 1200, 320)
-        self.height = _clamp_int(self.height, 150, 800, 232)
+        self.width = _clamp_int(self.width, 220, 1200, 288)
+        self.height = _clamp_int(self.height, 140, 800, 220)
 
         # Metrics: keep only known keys, preserve order, dedupe, never empty.
         seen: set[str] = set()
@@ -105,7 +114,7 @@ class Config:
         self.enabled_metrics = cleaned or ["ram"]
 
         for b in ("always_on_top", "snap_to_edges", "autostart",
-                  "start_hidden", "show_sparkline"):
+                  "start_hidden", "show_sparkline", "compact"):
             setattr(self, b, bool(getattr(self, b)))
         self.process_name = (self.process_name or "").strip()
         return self

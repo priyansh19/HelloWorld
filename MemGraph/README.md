@@ -110,6 +110,17 @@ The temp row's muted label shows the source (`LibreHardwareMonitor`, `ACPI`, …
 For NVIDIA GPUs, GPU temperature also comes directly from NVML with nothing to
 install.
 
+## Display modes
+
+Toggle from the widget's ⋯ menu (or Settings → Behaviour):
+
+- **Pinned** — the compact card stays on screen (drag it anywhere) until you
+  hide or quit it.
+- **Peek** — the card hides at the right screen edge as a slim vertical
+  **MEMGRAPH** tab. Click the tab and it slides out into the foreground, stays
+  for the auto-hide duration (default 2 min, and while you hover it), then slides
+  back in. The slide is a fast 150 ms animation.
+
 ## Settings
 
 Stored at `%LOCALAPPDATA%\MemGraph\config.json`, edited from the in-app dialog:
