@@ -141,10 +141,17 @@ class SettingsDialog(QtWidgets.QDialog):
         form = QtWidgets.QFormLayout(w)
 
         self.combo_mode = QtWidgets.QComboBox()
+        self.combo_mode.addItem("Llama (taskbar buddy)", "llama")
         self.combo_mode.addItem("Pinned (always visible)", "pinned")
         self.combo_mode.addItem("Peek (slide-out tab, auto-hide)", "peek")
-        self.combo_mode.setCurrentIndex(1 if self._cfg.mode == "peek" else 0)
+        idx = self.combo_mode.findData(self._cfg.mode)
+        self.combo_mode.setCurrentIndex(max(0, idx))
         form.addRow("Display mode:", self.combo_mode)
+
+        self.chk_wander = QtWidgets.QCheckBox(
+            "Llama may wander along the taskbar")
+        self.chk_wander.setChecked(self._cfg.llama_wander)
+        form.addRow(self.chk_wander)
 
         self.spin_peek = QtWidgets.QSpinBox()
         self.spin_peek.setRange(10, 600)
@@ -194,6 +201,7 @@ class SettingsDialog(QtWidgets.QDialog):
             temp_red=self.spin_tred.value(),
             mode=self.combo_mode.currentData(),
             peek_seconds=self.spin_peek.value(),
+            llama_wander=self.chk_wander.isChecked(),
             compact=self.chk_compact.isChecked(),
             always_on_top=self.chk_ontop.isChecked(),
             snap_to_edges=self.chk_snap.isChecked(),

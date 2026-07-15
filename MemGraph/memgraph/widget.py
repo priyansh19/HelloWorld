@@ -535,12 +535,12 @@ class MemGraphWidget(QtWidgets.QWidget):
 
     def _popup(self, global_pos: QtCore.QPoint) -> None:
         menu = QtWidgets.QMenu(self)
-        peek = self.cfg.mode == "peek"
-        a_pin = menu.addAction("✓ Pinned mode" if not peek else "Pinned mode")
-        a_pin.triggered.connect(lambda: self.request_mode.emit("pinned"))
-        a_peek = menu.addAction("✓ Peek mode (auto-hide)" if peek
-                                else "Peek mode (auto-hide)")
-        a_peek.triggered.connect(lambda: self.request_mode.emit("peek"))
+        mode = self.cfg.mode
+        for value, label in (("pinned", "Pinned mode"),
+                             ("peek", "Peek mode (auto-hide)"),
+                             ("llama", "Llama mode (taskbar buddy)")):
+            text = f"✓ {label}" if mode == value else label
+            menu.addAction(text, lambda v=value: self.request_mode.emit(v))
         menu.addSeparator()
         menu.addAction("Settings…", self.request_settings.emit)
         menu.addAction("Enable full temperatures (admin)…",

@@ -120,8 +120,16 @@ from NVML.
 
 ## Display modes
 
-Toggle from the widget's ⋯ menu (or Settings → Behaviour):
+Toggle from the widget's ⋯ menu, the llama's right-click menu, or Settings →
+Behaviour:
 
+- **Llama (default)** — a tiny pixel llama lives on your taskbar and *is* the
+  monitor: its **stride speed = CPU** (stroll → walk → gallop), its
+  **saddle-pack swells** past the amber RAM threshold, it puts **shades on**
+  while your tracked LLM process (e.g. `ollama.exe`) is running, and past the
+  red threshold it **panics** (red tint, sweat, `!!`). Hover for a quick
+  readout, **click it to pop the full stat card**, drag it anywhere along the
+  taskbar. It occasionally wanders a few pixels when relaxed (toggleable).
 - **Pinned** — the compact card stays on screen (drag it anywhere) until you
   hide or quit it.
 - **Peek** — the card hides at the right screen edge as a slim vertical

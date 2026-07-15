@@ -58,9 +58,13 @@ class Config:
     compact: bool = True           # tighter paddings/fonts
 
     # Display mode: "pinned" stays on screen; "peek" hides at the right edge as
-    # a slim tab that slides out on click and auto-hides after peek_seconds.
-    mode: str = "peek"             # "pinned" | "peek" (peek is the default)
+    # a slim tab that slides out on click and auto-hides after peek_seconds;
+    # "llama" is the taskbar buddy — a pixel llama whose gait/pack/mood show
+    # CPU/RAM live, with the stat card one click away.
+    mode: str = "llama"            # "pinned" | "peek" | "llama"
     peek_seconds: int = 120
+    llama_x: int = -1              # remembered taskbar position
+    llama_wander: bool = True      # occasionally strolls along the taskbar
 
     # Colour thresholds (percent) for usage/memory metrics.
     threshold_amber: int = 70
@@ -97,9 +101,10 @@ class Config:
 
         if self.theme not in ("midnight", "graphite", "light"):
             self.theme = "midnight"
-        if self.mode not in ("pinned", "peek"):
-            self.mode = "pinned"
+        if self.mode not in ("pinned", "peek", "llama"):
+            self.mode = "llama"
         self.peek_seconds = _clamp_int(self.peek_seconds, 10, 600, 120)
+        self.llama_x = _clamp_int(self.llama_x, -1, 20000, -1)
 
         self.width = _clamp_int(self.width, 220, 1200, 288)
         self.height = _clamp_int(self.height, 140, 800, 220)
@@ -114,7 +119,7 @@ class Config:
         self.enabled_metrics = cleaned or ["ram"]
 
         for b in ("always_on_top", "snap_to_edges", "autostart",
-                  "start_hidden", "show_sparkline", "compact"):
+                  "start_hidden", "show_sparkline", "compact", "llama_wander"):
             setattr(self, b, bool(getattr(self, b)))
         self.process_name = (self.process_name or "").strip()
         return self
