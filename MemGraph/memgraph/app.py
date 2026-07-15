@@ -49,6 +49,7 @@ class MemGraphApp:
         self.tray = Tray(self.qapp)
         self.tray.toggle_visibility.connect(self.toggle_widget)
         self.tray.open_settings.connect(self.open_settings)
+        self.tray.set_mode.connect(self.set_mode)
         self.tray.quit.connect(self.quit)
 
         autostart.apply(self.cfg.autostart)

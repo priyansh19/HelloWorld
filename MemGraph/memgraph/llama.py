@@ -35,6 +35,9 @@ from .metrics import MetricsSampler
 _SCALE = 3.0
 _PAD_TOP = 14          # headroom for the "!!" and sweat drop
 _METRICS_MS = 1000
+_MOVE_MS = 30          # ~33 fps movement stepper
+# Travel speed multiplier per gait — CPU load makes the llama cross faster.
+_GAIT_SPEED = {"idle": 0.65, "walk": 1.0, "gallop": 2.4}
 
 
 class LlamaBuddy(QtWidgets.QWidget):
@@ -62,7 +65,6 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._frame_i = 0
         self._blink = False
         self._facing = 1              # 1 → right, -1 → left
-        self._wander_target: Optional[int] = None
         self._drag_x: Optional[int] = None
         self._press_pos: Optional[QtCore.QPoint] = None
         self._tooltip = ""
@@ -76,6 +78,12 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._metrics_timer.start(_METRICS_MS)
 
         self._dock()
+        self._pos_x = float(self.x())
+        # Smooth, high-frequency movement independent of the sprite cadence.
+        self._move_timer = QtCore.QTimer(self)
+        self._move_timer.timeout.connect(self._move_step)
+        self._move_timer.start(_MOVE_MS)
+
         self.tick()
 
     # ------------------------------------------------------------------ #
@@ -103,36 +111,42 @@ class LlamaBuddy(QtWidgets.QWidget):
         self.cfg = cfg
         self.tick()
         self._dock()
+        self._pos_x = float(self.x())
 
     # ------------------------------------------------------------------ #
-    # Animation / wandering
+    # Animation / traversal
     # ------------------------------------------------------------------ #
     def _on_anim(self) -> None:
+        if not self.isVisible():
+            return
         self._frame_i += 1
         # Occasional blink (only matters when shades are off).
         self._blink = (random.random() < 0.12)
-        if self.cfg.llama_wander and self._mood.wander_ok \
-                and self._drag_x is None:
-            self._wander_step()
         self.update()
 
-    def _wander_step(self) -> None:
+    def _move_step(self) -> None:
+        """Walk steadily across the screen, turning around at each edge.
+
+        One full crossing takes ``llama_cross_seconds`` (default ~10 min) at a
+        walk; the gait multiplier makes it cross faster under CPU load. The
+        sprite mirrors to face its direction of travel.
+        """
+        if not self.isVisible() or self._drag_x is not None \
+                or not self.cfg.llama_wander:
+            return
         geo = self._screen_geo()
-        if self._wander_target is None:
-            if random.random() < 0.012:   # ~ every 25s at walk cadence
-                span = 120
-                self._wander_target = max(
-                    geo.left(), min(geo.right() - self.width(),
-                                    self.x() + random.randint(-span, span)))
-        if self._wander_target is not None:
-            dx = self._wander_target - self.x()
-            if abs(dx) <= 2:
-                self._wander_target = None
-                self._facing = 1
-                return
-            step = 2 if self._mood.gait != "idle" else 1
-            self._facing = 1 if dx > 0 else -1
-            self.move(self.x() + step * self._facing, self.y())
+        left = geo.left()
+        right = geo.right() - self.width()
+        if right <= left:
+            return
+        px_per_sec = geo.width() / max(20, self.cfg.llama_cross_seconds)
+        mult = _GAIT_SPEED.get(self._mood.gait, 1.0)
+        self._pos_x += self._facing * px_per_sec * mult * (_MOVE_MS / 1000.0)
+        if self._pos_x <= left:
+            self._pos_x, self._facing = float(left), 1
+        elif self._pos_x >= right:
+            self._pos_x, self._facing = float(right), -1
+        self.move(int(round(self._pos_x)), self.y())
 
     # ------------------------------------------------------------------ #
     # Placement
@@ -215,7 +229,7 @@ class LlamaBuddy(QtWidgets.QWidget):
             if self._press_pos else 0
         self._drag_x = None
         self._press_pos = None
-        self._wander_target = None
+        self._pos_x = float(self.x())     # resume traversal from here
         if moved < 6:
             self.clicked.emit()
         else:

@@ -64,7 +64,8 @@ class Config:
     mode: str = "llama"            # "pinned" | "peek" | "llama"
     peek_seconds: int = 120
     llama_x: int = -1              # remembered taskbar position
-    llama_wander: bool = True      # occasionally strolls along the taskbar
+    llama_wander: bool = True      # walk back and forth across the screen
+    llama_cross_seconds: int = 600  # time for one full screen crossing (~10 min)
 
     # Colour thresholds (percent) for usage/memory metrics.
     threshold_amber: int = 70
@@ -105,6 +106,7 @@ class Config:
             self.mode = "llama"
         self.peek_seconds = _clamp_int(self.peek_seconds, 10, 600, 120)
         self.llama_x = _clamp_int(self.llama_x, -1, 20000, -1)
+        self.llama_cross_seconds = _clamp_int(self.llama_cross_seconds, 20, 3600, 600)
 
         self.width = _clamp_int(self.width, 220, 1200, 288)
         self.height = _clamp_int(self.height, 140, 800, 220)

@@ -149,9 +149,15 @@ class SettingsDialog(QtWidgets.QDialog):
         form.addRow("Display mode:", self.combo_mode)
 
         self.chk_wander = QtWidgets.QCheckBox(
-            "Llama may wander along the taskbar")
+            "Llama walks back and forth across the screen")
         self.chk_wander.setChecked(self._cfg.llama_wander)
         form.addRow(self.chk_wander)
+
+        self.spin_cross = QtWidgets.QSpinBox()
+        self.spin_cross.setRange(1, 60)
+        self.spin_cross.setSuffix(" min / crossing")
+        self.spin_cross.setValue(max(1, round(self._cfg.llama_cross_seconds / 60)))
+        form.addRow("Llama speed:", self.spin_cross)
 
         self.spin_peek = QtWidgets.QSpinBox()
         self.spin_peek.setRange(10, 600)
@@ -202,6 +208,7 @@ class SettingsDialog(QtWidgets.QDialog):
             mode=self.combo_mode.currentData(),
             peek_seconds=self.spin_peek.value(),
             llama_wander=self.chk_wander.isChecked(),
+            llama_cross_seconds=self.spin_cross.value() * 60,
             compact=self.chk_compact.isChecked(),
             always_on_top=self.chk_ontop.isChecked(),
             snap_to_edges=self.chk_snap.isChecked(),

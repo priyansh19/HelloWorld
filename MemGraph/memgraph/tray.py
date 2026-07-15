@@ -30,6 +30,7 @@ def build_icon() -> QtGui.QIcon:
 class Tray(QtCore.QObject):
     toggle_visibility = QtCore.Signal()
     open_settings = QtCore.Signal()
+    set_mode = QtCore.Signal(str)
     quit = QtCore.Signal()
 
     def __init__(self, parent: QtCore.QObject | None = None) -> None:
@@ -38,7 +39,16 @@ class Tray(QtCore.QObject):
         self.icon.setToolTip("MemGraph — memory monitor")
 
         menu = QtWidgets.QMenu()
-        menu.addAction("Show / Hide widget", self.toggle_visibility.emit)
+        menu.addAction("Show / Hide", self.toggle_visibility.emit)
+
+        mode_menu = menu.addMenu("Mode")
+        mode_menu.addAction("🦙  Llama (taskbar buddy)",
+                            lambda: self.set_mode.emit("llama"))
+        mode_menu.addAction("Peek (edge tab)",
+                            lambda: self.set_mode.emit("peek"))
+        mode_menu.addAction("Pinned (always visible)",
+                            lambda: self.set_mode.emit("pinned"))
+
         menu.addAction("Settings…", self.open_settings.emit)
         menu.addSeparator()
         menu.addAction("Quit", self.quit.emit)
