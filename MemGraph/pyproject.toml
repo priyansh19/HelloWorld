@@ -3,22 +3,53 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "memgraph"
-version = "1.0.0"
-description = "Lightweight Windows desktop widget for monitoring memory while running local LLMs"
+name = "memgraph-widget"
+version = "1.1.0"
+description = "A quirky desktop widget (with a walking taskbar llama) that monitors RAM/CPU/GPU/temps live — built for running local LLMs"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "MemGraph contributors" }]
+keywords = ["system-monitor", "memory", "widget", "taskbar", "ollama", "llm", "gpu", "psutil", "pyside6"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Monitoring",
+]
 dependencies = [
     "PySide6>=6.6",
     "psutil>=5.9",
     "nvidia-ml-py>=12.535",
 ]
 
+[project.optional-dependencies]
+# In-process CPU/GPU/memory temperatures via LibreHardwareMonitorLib (Windows).
+temps = ["pythonnet>=3.0"]
+
 [project.scripts]
 memgraph = "memgraph.app:main"
 
+[project.gui-scripts]
+# Console-less launcher (pythonw) so no terminal window flashes on Windows.
+memgraph-widget = "memgraph.app:main"
+
+[project.urls]
+Homepage = "https://github.com/priyansh19/HelloWorld/tree/master/MemGraph"
+Repository = "https://github.com/priyansh19/HelloWorld"
+Download = "https://github.com/priyansh19/HelloWorld/releases/tag/memgraph-latest"
+
 [tool.setuptools]
 packages = ["memgraph"]
+
+[tool.setuptools.package-data]
+# Ship the bundled sensor DLLs if CI placed them here (optional; temps work
+# without them via NVML/WMI/ACPI).
+memgraph = ["lhm/*.dll"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

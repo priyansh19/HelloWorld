@@ -27,7 +27,26 @@ llama.cpp, LM Studio, …).
 
 ---
 
-## Install (recommended)
+## Install with pip (recommended — no Smart App Control issues)
+
+Because the `.exe` is unsigned, **Windows Smart App Control** blocks it. Installing
+via pip avoids that entirely: the app runs through Python's own trusted
+`python.exe`, which SAC allows.
+
+```bash
+pip install memgraph-widget          # core (RAM/CPU/GPU + graph + llama)
+pip install "memgraph-widget[temps]" # + in-process CPU/GPU temperatures
+python -m memgraph                    # launch the widget
+```
+
+For a console-less launch on Windows (no terminal window): `pythonw -m memgraph`
+(or run the installed `memgraph-widget` GUI script). To start it at login, add
+that command to your Startup folder.
+
+> Run it as **`python -m memgraph`** rather than the generated `memgraph.exe`
+> shim — the `-m` form is guaranteed to run through the trusted interpreter.
+
+## Install the packaged .exe
 
 1. Download **`MemGraph-Setup.exe`** — the login-free direct link:
    **https://github.com/priyansh19/HelloWorld/releases/download/memgraph-latest/MemGraph-Setup.exe**
@@ -36,8 +55,9 @@ llama.cpp, LM Studio, …).
 3. The widget launches and lives in your system tray. Right-click it (or the
    tray icon) → **Settings…** to choose metrics and styling.
 
-> Windows SmartScreen may warn because the exe is unsigned — click
-> **More info → Run anyway**.
+> Because the exe is unsigned, **SmartScreen** warns (click *More info → Run
+> anyway*) and **Smart App Control**, if on, blocks it outright with no bypass —
+> use the pip install above instead.
 
 ### Updating
 
@@ -190,3 +210,25 @@ pytest -q
 CI (`.github/workflows/build-memgraph.yml`) runs the tests, builds
 `MemGraph-Setup.exe` on a Windows runner, and publishes it to the
 `memgraph-latest` GitHub Release for every push touching `MemGraph/`.
+
+## Publish to PyPI
+
+The package publishes via **PyPI Trusted Publishing** (OIDC) — no API token to
+store. One-time setup on PyPI (project owner):
+
+1. Create a PyPI account at https://pypi.org.
+2. Go to **Your account → Publishing → Add a pending publisher** and enter:
+   - **PyPI project name:** `memgraph-widget`
+   - **Owner:** `priyansh19`  ·  **Repository:** `HelloWorld`
+   - **Workflow name:** `publish-pypi.yml`  ·  **Environment:** `pypi`
+3. In the GitHub repo, create an **Environment** named `pypi`
+   (Settings → Environments).
+
+Then publish by tagging a release:
+
+```bash
+git tag v1.1.0 && git push origin v1.1.0     # triggers .github/workflows/publish-pypi.yml
+```
+
+or run the **Publish to PyPI** workflow manually from the Actions tab. Build
+locally with `python -m build` (outputs `dist/`).

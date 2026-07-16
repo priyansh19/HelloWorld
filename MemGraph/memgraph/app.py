@@ -207,10 +207,13 @@ def main(argv: list[str] | None = None) -> int:
         return run_installer()
     if "--widget" in argv or "--run" in argv:
         return _run_widget(takeover="--takeover" in argv)
-    # No explicit mode: installed copies run the widget, otherwise show setup.
-    if is_installed_copy():
-        return _run_widget()
-    return run_installer()
+    # No explicit mode:
+    #  * the frozen .exe shows the setup wizard on first run (before install);
+    #  * everything else — pip install, `python -m memgraph`, source, or an
+    #    installed copy — runs the widget directly.
+    if getattr(sys, "frozen", False) and not is_installed_copy():
+        return run_installer()
+    return _run_widget()
 
 
 if __name__ == "__main__":
