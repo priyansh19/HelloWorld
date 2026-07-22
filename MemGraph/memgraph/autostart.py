@@ -29,8 +29,12 @@ def current_launch_command() -> str:
     """
     exe = Path(sys.executable)
     if getattr(sys, "frozen", False):
-        return f'"{exe}"'
-    return f'"{exe}" -m memgraph'
+        return f'"{exe}" --widget'
+    # From a pip/source install, prefer the console-less pythonw.exe so no
+    # terminal window flashes at login.
+    pyw = exe.with_name("pythonw.exe")
+    launcher = pyw if pyw.exists() else exe
+    return f'"{launcher}" -m memgraph --widget'
 
 
 def is_enabled() -> bool:
