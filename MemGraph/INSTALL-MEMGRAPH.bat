@@ -23,6 +23,15 @@ if errorlevel 1 (
 
 for /f "delims=" %%V in ('python --version') do echo Using %%V
 
+REM ---- 1b. Enable Windows Long Path support (PySide6 has very deep paths) --
+reg query "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled 2>nul | find "0x1" >nul
+if errorlevel 1 (
+    echo.
+    echo Enabling Windows long-path support ^(needed for PySide6^).
+    echo A Windows security ^(UAC^) prompt will appear - please click Yes.
+    powershell -NoProfile -Command "Start-Process reg -Verb RunAs -Wait -ArgumentList 'add HKLM\SYSTEM\CurrentControlSet\Control\FileSystem /v LongPathsEnabled /t REG_DWORD /d 1 /f'"
+)
+
 echo.
 echo [1/4] Upgrading pip...
 python -m pip install --upgrade pip

@@ -22,7 +22,9 @@ classifiers = [
     "Topic :: System :: Monitoring",
 ]
 dependencies = [
-    "PySide6>=6.6",
+    # Essentials only (QtWidgets/Gui/Core/Network) — avoids the ~170 MB
+    # PySide6-Addons download the widget never uses.
+    "PySide6-Essentials>=6.6",
     "psutil>=5.9",
     "nvidia-ml-py>=12.535",
 ]
