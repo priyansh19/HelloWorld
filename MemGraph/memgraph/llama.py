@@ -32,7 +32,8 @@ from .buddy_logic import (
 from .config import Config
 from .metrics import MetricsSampler
 
-_SCALE_BASE = 3.0      # multiplied by cfg.llama_scale
+_SCALE_BASE = 1.0      # px per sprite cell, multiplied by cfg.llama_scale
+                       # (the tortoise sprite is high-resolution: 54x34 cells)
 _METRICS_MS = 1000
 _MOVE_MS = 30          # ~33 fps movement stepper
 # Travel speed multiplier per gait. Kept close to 1 so the llama always strolls
@@ -233,15 +234,14 @@ class LlamaBuddy(QtWidgets.QWidget):
 
         if m.panic:
             p.setRenderHint(QtGui.QPainter.Antialiasing)
-            head_x = ox + (21 * s if self._facing == 1 else (SPRITE_W - 21) * s)
-            p.setPen(QtCore.Qt.NoPen)
-            p.setBrush(QtGui.QColor("#6fd9ff"))
-            p.drawEllipse(QtCore.QPointF(head_x, oy + 1.0 * s), 2.5, 4)
+            head_col = 48  # tortoise head sits near the right edge of the sprite
+            head_x = ox + (head_col * s if self._facing == 1
+                           else (SPRITE_W - head_col) * s)
             p.setPen(QtGui.QColor(PANIC_TINT))
-            f = QtGui.QFont("Segoe UI", 10, QtGui.QFont.Black)
+            f = QtGui.QFont("Segoe UI", int(6 * self._scale), QtGui.QFont.Black)
             p.setFont(f)
-            p.drawText(QtCore.QRectF(head_x - 26, 0, 30, 14),
-                       QtCore.Qt.AlignRight, "!!")
+            p.drawText(QtCore.QRectF(head_x - 30, 0, 34, self._pad_top + 2),
+                       QtCore.Qt.AlignHCenter | QtCore.Qt.AlignBottom, "!!")
 
     # ------------------------------------------------------------------ #
     # Mouse: drag along the taskbar, click to open the card, menu on right

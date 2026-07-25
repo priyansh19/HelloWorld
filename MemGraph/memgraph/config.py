@@ -66,7 +66,7 @@ class Config:
     llama_x: int = -1              # remembered taskbar position
     llama_wander: bool = True      # walk back and forth across the screen
     llama_cross_seconds: int = 300  # time for one full screen crossing (~5 min)
-    llama_scale: float = 1.8       # size multiplier for the llama sprite
+    llama_scale: float = 1.5       # size multiplier for the buddy sprite
 
     # Colour thresholds (percent) for usage/memory metrics.
     threshold_amber: int = 70
@@ -108,7 +108,7 @@ class Config:
         self.peek_seconds = _clamp_int(self.peek_seconds, 10, 600, 120)
         self.llama_x = _clamp_int(self.llama_x, -1, 20000, -1)
         self.llama_cross_seconds = _clamp_int(self.llama_cross_seconds, 20, 3600, 300)
-        self.llama_scale = _clamp_float(self.llama_scale, 1.0, 4.0, 1.8)
+        self.llama_scale = _clamp_float(self.llama_scale, 0.8, 3.0, 1.5)
 
         self.width = _clamp_int(self.width, 220, 1200, 288)
         self.height = _clamp_int(self.height, 140, 800, 220)
