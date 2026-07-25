@@ -219,16 +219,19 @@ class LlamaBuddy(QtWidgets.QWidget):
         p = QtGui.QPainter(self)
         s = self._scale
         ox, oy = self._ox, float(self._pad_top)
-        tint = QtGui.QColor(PANIC_TINT) if m.panic else None
+        # RAM alarm: blend toward red by the stress level (face/legs/shell).
+        amt = min(0.85, m.stress * 0.85)
+        tint = QtGui.QColor(PANIC_TINT)
         for ry, row in enumerate(rows):
             for rx, ch in enumerate(row):
                 if ch == ".":
                     continue
                 col = QtGui.QColor(PALETTE.get(ch, "#f2e3c8"))
-                if tint is not None and ch not in TINT_EXEMPT:
-                    col = QtGui.QColor((col.red() + tint.red() * 2) // 3,
-                                       (col.green() + tint.green() * 2) // 3,
-                                       (col.blue() + tint.blue() * 2) // 3)
+                if amt > 0 and ch not in TINT_EXEMPT:
+                    col = QtGui.QColor(
+                        int(col.red() * (1 - amt) + tint.red() * amt),
+                        int(col.green() * (1 - amt) + tint.green() * amt),
+                        int(col.blue() * (1 - amt) + tint.blue() * amt))
                 px = rx if self._facing == 1 else (SPRITE_W - 1 - rx)
                 p.fillRect(QtCore.QRectF(ox + px * s, oy + ry * s, s, s), col)
 

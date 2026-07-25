@@ -60,7 +60,7 @@ python -m pip install pythonnet >nul 2>&1
 
 echo.
 echo [3b/4] Configuring metrics and the walking llama...
-python -c "from memgraph.config import load_config, save_config; c=load_config(); c.mode='llama'; c.enabled_metrics=['cpu','ram','gpu','vram','npu']; c.llama_wander=True; c.llama_cross_seconds=300; c.llama_scale=1.5; save_config(c)" 2>nul
+python -c "from memgraph.config import load_config, save_config; c=load_config(); c.mode='llama'; c.enabled_metrics=['cpu','ram','gpu','vram','npu']; c.llama_wander=True; c.llama_cross_seconds=180; c.llama_scale=2.25; save_config(c)" 2>nul
 
 echo.
 echo [4/4] Launching MemGraph...

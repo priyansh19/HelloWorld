@@ -167,6 +167,7 @@ class Mood:
     shades: bool         # tracked LLM process is running
     panic: bool          # RAM past the red threshold
     frame_ms: int        # animation frame interval
+    stress: float = 0.0  # 0..1 RAM alarm level -> how red the buddy turns
 
     @property
     def wander_ok(self) -> bool:
@@ -175,11 +176,17 @@ class Mood:
 
 def mood_for(cpu_pct: float, ram_pct: float, amber: float, red: float,
              model_loaded: bool) -> Mood:
-    """CPU sets leg-shuffle speed via frame_ms; RAM past red = panic; a running
-    tracked process puts sunglasses on. Traversal speed is RAM-driven in the
-    widget."""
-    panic = ram_pct >= red
-    if panic:
+    """Map live metrics to behaviour.
+
+    RAM drives the alarm: once memory passes the amber threshold the buddy turns
+    progressively **red** and starts **running** (gallop), reaching full red at
+    the red threshold. Below amber, CPU sets a calm idle/walk/gallop gait. A
+    running tracked process puts sunglasses on.
+    """
+    stress = 0.0
+    if ram_pct >= amber:
+        frac = min(1.0, (ram_pct - amber) / max(1.0, red - amber))
+        stress = 0.25 + 0.75 * frac        # clearly red even just over amber
         gait = "gallop"
     elif cpu_pct < 12:
         gait = "idle"
@@ -187,12 +194,15 @@ def mood_for(cpu_pct: float, ram_pct: float, amber: float, red: float,
         gait = "walk"
     else:
         gait = "gallop"
+
+    panic = ram_pct >= red
     pack = "full" if ram_pct >= amber else "normal"
     if gait == "idle":
         frame_ms = 200
     elif gait == "walk":
         frame_ms = int(150 - 1.0 * cpu_pct)
     else:
-        frame_ms = max(55, int(110 - 0.5 * cpu_pct))
+        # Faster legs the more stressed / loaded it is.
+        frame_ms = int(110 - 0.5 * cpu_pct - 35 * stress)
     return Mood(gait=gait, pack=pack, shades=model_loaded,
-                panic=panic, frame_ms=max(45, frame_ms))
+                panic=panic, frame_ms=max(45, frame_ms), stress=stress)
