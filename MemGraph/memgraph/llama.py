@@ -19,18 +19,15 @@ from typing import Callable, Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from .buddy_logic import (
-    PALETTE,
-    PANIC_TINT,
-    SPRITE_H,
-    SPRITE_W,
-    TINT_EXEMPT,
-    apply_overlays,
-    frames_for_gait,
-    mood_for,
-)
+from . import buddy_logic, car_logic
+from .buddy_logic import mood_for
 from .config import Config
 from .metrics import MetricsSampler
+
+
+def _sprite_module(character: str):
+    """The art module for the chosen character ("tortoise" or "car")."""
+    return car_logic if character == "car" else buddy_logic
 
 _SCALE_BASE = 1.0      # px per sprite cell, multiplied by cfg.llama_scale
                        # (the tortoise sprite is high-resolution: 54x34 cells)
@@ -39,6 +36,9 @@ _MOVE_MS = 30          # ~33 fps movement stepper
 # Travel speed multiplier per gait. Kept close to 1 so the llama always strolls
 # at a visible, mild pace (CPU load just nudges it a bit faster).
 _GAIT_SPEED = {"idle": 0.85, "walk": 1.0, "gallop": 1.6}
+# A car should cruise, not creep — the Mustang drifts along the taskbar
+# noticeably faster than the tortoise walks.
+_CAR_DRIFT_SPEED = 3.0
 
 
 class LlamaBuddy(QtWidgets.QWidget):
@@ -46,6 +46,8 @@ class LlamaBuddy(QtWidgets.QWidget):
     request_settings = QtCore.Signal()
     request_quit = QtCore.Signal()
     request_mode = QtCore.Signal(str)
+    request_character = QtCore.Signal(str)   # "car" | "tortoise"
+    request_smoke = QtCore.Signal(bool)      # toggle the RAM smoke plume
 
     def __init__(self, config: Config, sampler: MetricsSampler,
                  on_move: Optional[Callable[[int], None]] = None) -> None:
@@ -57,8 +59,10 @@ class LlamaBuddy(QtWidgets.QWidget):
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.Tool |
                             QtCore.Qt.WindowStaysOnTopHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
+        self._art = _sprite_module(config.buddy_character)
         self._scale = _SCALE_BASE * config.llama_scale
         self._pad_top = int(6 * config.llama_scale)  # headroom for "!!"/sweat
+        self._smoke = None            # created lazily for the car character
         self._recompute_size()
 
         self._mood = mood_for(0, 0, config.threshold_amber,
@@ -110,22 +114,60 @@ class LlamaBuddy(QtWidgets.QWidget):
             tip.append(f"{self.cfg.process_name} {proc.pct:.0f}%")
         self._tooltip = "  ·  ".join(tip)
         self.setToolTip(self._tooltip)
+        self._update_smoke(self._mood.stress)
         self.update()
 
     def _recompute_size(self) -> None:
         self._ox = 6.0
-        w = int(SPRITE_W * self._scale + 2 * self._ox)
-        h = int(SPRITE_H * self._scale) + self._pad_top
+        w = int(self._art.SPRITE_W * self._scale + 2 * self._ox)
+        h = int(self._art.SPRITE_H * self._scale) + self._pad_top
         self.setFixedSize(w, h)
 
     def apply_config(self, cfg: Config) -> None:
         self.cfg = cfg
+        self._art = _sprite_module(cfg.buddy_character)
         self._scale = _SCALE_BASE * cfg.llama_scale
         self._pad_top = int(6 * cfg.llama_scale)
         self._recompute_size()
+        if cfg.buddy_character != "car":
+            self._stop_smoke()
         self.tick()
         self._dock()
         self._pos_x = float(self.x())
+
+    # ------------------------------------------------------------------ #
+    # RAM "burnout" smoke (car character only)
+    # ------------------------------------------------------------------ #
+    def _stop_smoke(self) -> None:
+        if self._smoke is not None:
+            self._smoke.run(False)
+            self._smoke.hide()
+
+    def _update_smoke(self, stress: float) -> None:
+        """Puff grey smoke from the exhaust in proportion to RAM stress."""
+        if self.cfg.buddy_character != "car" or not self.cfg.car_smoke:
+            self._stop_smoke()
+            return
+        if stress <= 0.0 and self._smoke is None:
+            return
+        if self._smoke is None:
+            from .smoke import SmokeOverlay
+            self._smoke = SmokeOverlay()
+        sm = self._smoke
+        sm.cover_screen(self.screen().geometry() if self.screen()
+                        else self._screen_geo())
+        sm.set_intensity(stress)
+        # Track the exhaust tip as the car drifts (mirrored when facing left).
+        ex, ey = self._art.EXHAUST
+        col = ex if self._facing == 1 else (self._art.SPRITE_W - 1 - ex)
+        sm.set_source(self.x() + self._ox + col * self._scale,
+                      self.y() + self._pad_top + ey * self._scale)
+        if stress > 0.0 and not self._fs_hidden and self.isVisible():
+            if not sm.isVisible():
+                sm.show()
+            sm.run(True)
+        else:
+            self._stop_smoke()
 
     # ------------------------------------------------------------------ #
     # Animation / traversal
@@ -148,6 +190,7 @@ class LlamaBuddy(QtWidgets.QWidget):
         if fs and not self._fs_hidden and self.isVisible():
             self._fs_hidden = True
             self.hide()
+            self._stop_smoke()
         elif not fs and self._fs_hidden:
             self._fs_hidden = False
             self.show()
@@ -180,12 +223,16 @@ class LlamaBuddy(QtWidgets.QWidget):
         px_per_sec = geo.width() / max(20, self.cfg.llama_cross_seconds)
         mult = (_GAIT_SPEED.get(self._mood.gait, 1.0)
                 * self._ram_speed_mult(self._ram_pct))
+        if self.cfg.buddy_character == "car":
+            mult *= _CAR_DRIFT_SPEED
         self._pos_x += self._facing * px_per_sec * mult * (_MOVE_MS / 1000.0)
         if self._pos_x <= left:
             self._pos_x, self._facing = float(left), 1
         elif self._pos_x >= right:
             self._pos_x, self._facing = float(right), -1
         self.move(int(round(self._pos_x)), self.y())
+        if self._smoke is not None and self._smoke.isVisible():
+            self._update_smoke(self._mood.stress)   # plume follows the exhaust
 
     # ------------------------------------------------------------------ #
     # Placement
@@ -211,10 +258,13 @@ class LlamaBuddy(QtWidgets.QWidget):
     # ------------------------------------------------------------------ #
     def paintEvent(self, _e: QtGui.QPaintEvent) -> None:
         m = self._mood
-        frames = frames_for_gait(m.gait)
+        art = self._art
+        frames = art.frames_for_gait(m.gait)
         rows = frames[self._frame_i % len(frames)]
-        rows = apply_overlays(rows, shades=m.shades,
-                              blink=self._blink and not m.shades)
+        rows = art.apply_overlays(rows, shades=m.shades,
+                                  blink=self._blink and not m.shades)
+        PALETTE, PANIC_TINT = art.PALETTE, art.PANIC_TINT
+        TINT_EXEMPT, SPRITE_W = art.TINT_EXEMPT, art.SPRITE_W
 
         p = QtGui.QPainter(self)
         s = self._scale
@@ -235,7 +285,8 @@ class LlamaBuddy(QtWidgets.QWidget):
                 px = rx if self._facing == 1 else (SPRITE_W - 1 - rx)
                 p.fillRect(QtCore.QRectF(ox + px * s, oy + ry * s, s, s), col)
 
-        if m.panic:
+        # The car conveys panic through its smoke plume, not a "!!" bubble.
+        if m.panic and self.cfg.buddy_character != "car":
             p.setRenderHint(QtGui.QPainter.Antialiasing)
             head_col = 50  # tortoise head sits near the right edge of the sprite
             head_x = ox + (head_col * s if self._facing == 1
@@ -282,6 +333,15 @@ class LlamaBuddy(QtWidgets.QWidget):
     def contextMenuEvent(self, e: QtGui.QContextMenuEvent) -> None:
         menu = QtWidgets.QMenu(self)
         menu.addAction("Open stats", self.clicked.emit)
+        menu.addSeparator()
+        car = self.cfg.buddy_character == "car"
+        menu.addAction(("✓ " if car else "") + "Mustang",
+                       lambda: self.request_character.emit("car"))
+        menu.addAction(("✓ " if not car else "") + "Tortoise",
+                       lambda: self.request_character.emit("tortoise"))
+        if car:
+            menu.addAction(("✓ " if self.cfg.car_smoke else "") + "RAM smoke",
+                           lambda: self.request_smoke.emit(not self.cfg.car_smoke))
         menu.addSeparator()
         menu.addAction("Pinned mode", lambda: self.request_mode.emit("pinned"))
         menu.addAction("Peek mode", lambda: self.request_mode.emit("peek"))

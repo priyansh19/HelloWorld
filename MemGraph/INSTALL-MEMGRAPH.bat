@@ -59,8 +59,8 @@ REM Optional: in-process CPU/GPU temperatures (safe to fail).
 python -m pip install pythonnet >nul 2>&1
 
 echo.
-echo [3b/4] Configuring metrics and the walking llama...
-python -c "from memgraph.config import load_config, save_config; c=load_config(); c.mode='llama'; c.enabled_metrics=['cpu','ram','gpu','vram','npu']; c.llama_wander=True; c.llama_cross_seconds=180; c.llama_scale=4.05; save_config(c)" 2>nul
+echo [3b/4] Configuring metrics and the drifting Mustang...
+python -c "from memgraph.config import load_config, save_config; c=load_config(); c.mode='llama'; c.enabled_metrics=['cpu','ram','gpu','vram','npu']; c.llama_wander=True; c.llama_cross_seconds=180; c.llama_scale=4.05; c.buddy_character='car'; c.car_smoke=True; save_config(c)" 2>nul
 
 echo.
 echo [4/4] Launching MemGraph...

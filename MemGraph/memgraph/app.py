@@ -66,7 +66,22 @@ class MemGraphApp:
             self.llama.request_settings.connect(self.open_settings)
             self.llama.request_quit.connect(self.quit)
             self.llama.request_mode.connect(self.set_mode)
+            self.llama.request_character.connect(self.set_character)
+            self.llama.request_smoke.connect(self.set_car_smoke)
         return self.llama
+
+    def set_character(self, character: str) -> None:
+        """Swap the taskbar buddy between the Mustang and the tortoise."""
+        self.cfg.buddy_character = character
+        save_config(self.cfg)
+        if self.llama is not None:
+            self.llama.apply_config(self.cfg)
+
+    def set_car_smoke(self, on: bool) -> None:
+        self.cfg.car_smoke = bool(on)
+        save_config(self.cfg)
+        if self.llama is not None:
+            self.llama.apply_config(self.cfg)
 
     def _sync_mode_widgets(self, initial: bool = False) -> None:
         """Show the right surfaces for the current mode."""
