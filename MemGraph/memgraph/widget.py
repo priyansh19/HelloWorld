@@ -130,44 +130,57 @@ class MiniBar(QtWidgets.QWidget):
         p.drawRoundedRect(fill, radius, radius)
 
 
-class MetricRow(QtWidgets.QWidget):
+class MetricTile(QtWidgets.QWidget):
+    """A Task-Manager-style row: a small live graph box, then name + detail."""
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         lay = QtWidgets.QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(8)
-        self.label = QtWidgets.QLabel("—")
-        self.label.setObjectName("rowLabel")
-        self.label.setFixedWidth(58)
-        self.bar = MiniBar()
-        self.detail = QtWidgets.QLabel("")
-        self.detail.setObjectName("rowDetail")
-        self.detail.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-        self.value = QtWidgets.QLabel("0%")
-        self.value.setObjectName("rowValue")
-        self.value.setFixedWidth(46)
-        self.value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-        lay.addWidget(self.label)
-        lay.addWidget(self.bar, 1)
-        lay.addWidget(self.detail)
-        lay.addWidget(self.value)
+        lay.setSpacing(11)
 
-    def update_metric(self, m: Metric, cfg: Config, track: QtGui.QColor) -> None:
+        self.graph = Sparkline()
+        self.graph.set_compact(True)
+        self.graph.setFixedSize(74, 42)
+
+        text = QtWidgets.QVBoxLayout()
+        text.setContentsMargins(0, 0, 0, 0)
+        text.setSpacing(1)
+        self.label = QtWidgets.QLabel("—")
+        self.label.setObjectName("tileLabel")
+        self.detail = QtWidgets.QLabel("")
+        self.detail.setObjectName("tileDetail")
+        text.addStretch(1)
+        text.addWidget(self.label)
+        text.addWidget(self.detail)
+        text.addStretch(1)
+
+        lay.addWidget(self.graph)
+        lay.addLayout(text, 1)
+
+    def update_metric(self, m: Metric, history: list[float], cfg: Config,
+                      box_bg: QtGui.QColor, box_border: QtGui.QColor) -> None:
         self.label.setText(m.label)
         if m.available:
             level = m.level(cfg.threshold_amber, cfg.threshold_red,
                             cfg.temp_amber, cfg.temp_red)
             color = color_for_level(level)
-            self.bar.show()
-            self.bar.set_value(m.pct, color, track)
-            self.detail.setText(m.sub_text())
-            self.value.setText(m.value_text())
-            self.value.setStyleSheet(f"color:{color};")
+            self.graph.set_box_colors(box_bg, box_border)
+            self.graph.set_data(history, color)
+            # e.g. "34%  ·  16 threads"  /  "24.8 / 31.4 GB  ·  79%"
+            parts = [m.value_text()]
+            sub = m.sub_text()
+            if sub and m.kind == "bytes":
+                parts = [sub, m.value_text()]
+            elif sub:
+                parts.append(sub)
+            self.detail.setText("  ·  ".join(parts))
+            self.detail.setStyleSheet(f"color:{color};")
         else:
-            self.bar.hide()
-            self.detail.setText(m.detail or "")
-            self.value.setText("n/a")
-            self.value.setStyleSheet("color:#6b7280;")
+            self.graph.set_box_colors(box_bg, box_border)
+            self.graph.set_data([], "#6b7280")
+            self.detail.setText(m.detail or "n/a")
+            self.detail.setStyleSheet("color:#6b7280;")
 
 
 class MemGraphWidget(QtWidgets.QWidget):
@@ -184,8 +197,8 @@ class MemGraphWidget(QtWidgets.QWidget):
         self.sampler = sampler
         self._on_move = on_move
         self._drag_offset: Optional[QtCore.QPoint] = None
-        self.history = History(config.history_points)
-        self.rows: dict[str, MetricRow] = {}
+        self._histories: dict[str, History] = {}   # one graph per metric
+        self.tiles: dict[str, MetricTile] = {}
         self._peek_open = False
 
         self.setWindowTitle("MemGraph")
@@ -249,28 +262,10 @@ class MemGraphWidget(QtWidgets.QWidget):
         top.addWidget(self.menu_btn)
         self.card_layout.addLayout(top)
 
-        hero = QtWidgets.QHBoxLayout()
-        self.hero_label = QtWidgets.QLabel("MEMORY")
-        self.hero_label.setObjectName("heroLabel")
-        self.hero_value = QtWidgets.QLabel("0%")
-        self.hero_value.setObjectName("heroValue")
-        self.hero_value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-        hero.addWidget(self.hero_label)
-        hero.addStretch(1)
-        hero.addWidget(self.hero_value)
-        self.card_layout.addLayout(hero)
-
-        self.spark = Sparkline()
-        self.card_layout.addWidget(self.spark, 1)
-
-        self.divider = QtWidgets.QFrame()
-        self.divider.setObjectName("divider")
-        self.divider.setFixedHeight(1)
-        self.card_layout.addWidget(self.divider)
-
-        self.rows_box = QtWidgets.QVBoxLayout()
-        self.rows_box.setSpacing(5)
-        self.card_layout.addLayout(self.rows_box)
+        # One Task-Manager-style tile (mini graph + label + detail) per metric.
+        self.tiles_box = QtWidgets.QVBoxLayout()
+        self.tiles_box.setSpacing(8)
+        self.card_layout.addLayout(self.tiles_box)
 
     def _apply_window_flags(self) -> None:
         flags = QtCore.Qt.FramelessWindowHint | QtCore.Qt.Tool
@@ -281,18 +276,15 @@ class MemGraphWidget(QtWidgets.QWidget):
     def _apply_theme(self) -> None:
         t = _THEMES.get(self.cfg.theme, _THEMES["midnight"])
         self._theme = t
-        comp = self.cfg.compact
         self.setWindowOpacity(self.cfg.opacity)
         self.card.setFixedWidth(self.cfg.width)  # deterministic width
-        self.spark.set_grid_color(_qcolor(t["grid"]))
-        self.spark.setVisible(self.cfg.show_sparkline)
-        self.spark.set_height(52 if comp else 84)
         self.tab.set_accent(t["brand"])
+        # Re-theme any existing tile graphs' grid.
+        for tile in self.tiles.values():
+            tile.graph.set_grid_color(_qcolor(t["grid"]))
 
-        self.card_layout.setContentsMargins(*((13, 9, 13, 11) if comp
-                                              else (16, 12, 16, 14)))
-        self.card_layout.setSpacing(5 if comp else 7)
-        hero_sz = 22 if comp else 30
+        self.card_layout.setContentsMargins(14, 10, 14, 12)
+        self.card_layout.setSpacing(8)
         self.setStyleSheet(f"""
             QLabel {{ color: {t['text']}; font-family: 'Segoe UI', sans-serif; }}
             #brand {{ color: {t['brand']}; font-size: 9px; font-weight: 700;
@@ -300,13 +292,8 @@ class MemGraphWidget(QtWidgets.QWidget):
             #menuBtn {{ color: {t['muted']}; font-size: 15px; font-weight: 700;
                         border: none; background: transparent; padding: 0 3px; }}
             #menuBtn:hover {{ color: {t['text']}; }}
-            #heroLabel {{ color: {t['muted']}; font-size: 11px; font-weight: 600;
-                          letter-spacing: 2px; }}
-            #heroValue {{ font-size: {hero_sz}px; font-weight: 800; }}
-            #rowLabel {{ color: {t['muted']}; font-size: 10px; font-weight: 600; }}
-            #rowDetail {{ color: {t['muted']}; font-size: 9px; }}
-            #rowValue {{ font-size: 11px; font-weight: 700; }}
-            #divider {{ background: rgba(255,255,255,0.08); }}
+            #tileLabel {{ font-size: 15px; font-weight: 700; }}
+            #tileDetail {{ font-size: 11px; }}
         """)
         self.card.update()
         self.update()
@@ -341,19 +328,8 @@ class MemGraphWidget(QtWidgets.QWidget):
         metrics = self.sampler.sample(self.cfg.enabled_metrics,
                                       self.cfg.process_name)
         if not metrics:
-            self.hero_value.setText("—")
             return
-        primary = metrics[0]
-        pct = primary.pct if primary.available else 0.0
-        self.history.append(pct)
-        level = primary.level(self.cfg.threshold_amber, self.cfg.threshold_red,
-                              self.cfg.temp_amber, self.cfg.temp_red)
-        color = color_for_level(level)
-        self.hero_label.setText(primary.label.upper())
-        self.hero_value.setText(primary.value_text())
-        self.hero_value.setStyleSheet(f"color:{color};")
-        self.spark.set_data(self.history.values(), color)
-        self._sync_rows(metrics)
+        self._sync_tiles(metrics)
         self._fit_to_content()
 
     def _fit_to_content(self) -> None:
@@ -367,26 +343,43 @@ class MemGraphWidget(QtWidgets.QWidget):
                 self._anim.state() != QtCore.QAbstractAnimation.Running:
             self._redock(animate=False)
 
-    def _sync_rows(self, metrics: list[Metric]) -> None:
-        track = _qcolor(self._theme["track"])
+    def _sync_tiles(self, metrics: list[Metric]) -> None:
+        box_bg = (QtGui.QColor(0, 0, 0, 22) if self.cfg.theme == "light"
+                  else QtGui.QColor(0, 0, 0, 70))
+        box_border = _qcolor(self._theme["border"])
+        grid = _qcolor(self._theme["grid"])
+        maxlen = self.cfg.history_points
         keys = [m.key for m in metrics]
-        for key in list(self.rows):
+
+        for key in list(self.tiles):
             if key not in keys:
-                w = self.rows.pop(key)
-                self.rows_box.removeWidget(w)
+                w = self.tiles.pop(key)
+                self.tiles_box.removeWidget(w)
                 w.deleteLater()
+                self._histories.pop(key, None)
+
         for m in metrics:
-            row = self.rows.get(m.key)
-            if row is None:
-                row = MetricRow(self.card)
-                self.rows[m.key] = row
-                self.rows_box.addWidget(row)
-            row.update_metric(m, self.cfg, track)
+            hist = self._histories.get(m.key)
+            if hist is None:
+                hist = History(maxlen)
+                self._histories[m.key] = hist
+            elif hist.maxlen != maxlen:
+                hist.resize(maxlen)
+            hist.append(m.pct if m.available else 0.0)
+
+            tile = self.tiles.get(m.key)
+            if tile is None:
+                tile = MetricTile(self.card)
+                tile.graph.set_grid_color(grid)
+                self.tiles[m.key] = tile
+                self.tiles_box.addWidget(tile)
+            tile.update_metric(m, hist.values(), self.cfg, box_bg, box_border)
 
     # ------------------------------------------------------------------ #
     def apply_config(self, cfg: Config) -> None:
         self.cfg = cfg
-        self.history.resize(cfg.history_points)
+        for hist in self._histories.values():
+            hist.resize(cfg.history_points)
         self._apply_window_flags()
         self.show()
         self._apply_theme()

@@ -42,7 +42,7 @@ METRIC_DEFS: tuple[MetricDef, ...] = (
 
 METRIC_BY_KEY = {d.key: d for d in METRIC_DEFS}
 ALL_METRIC_KEYS = [d.key for d in METRIC_DEFS]
-DEFAULT_METRICS = ["ram", "cpu", "vram", "process"]
+DEFAULT_METRICS = ["cpu", "ram", "gpu", "vram", "npu"]
 
 Level = str  # "ok" | "warn" | "crit"
 
@@ -151,7 +151,9 @@ class MetricsSampler:
         self._nvml_ok = False
         self._nvml_handle = None
         self._npu = None            # PerfCounter | None
-        self._gpu_engine = None     # PerfCounter fallback | None
+        self._gpu_engine = None     # GPU util PerfCounter | None
+        self._gpu_mem = None        # GPU dedicated-memory PerfCounter | None
+        self._gpu_total = None      # total VRAM bytes (registry) | None
         self._wtemps = None         # WinTemps | None (lazy)
         self._lhm = None            # LhmReader | None (lazy)
         self._init_psutil()
@@ -217,6 +219,22 @@ class MetricsSampler:
                 r"\GPU Engine(*)\Utilization Percentage")
         return self._gpu_engine
 
+    def _gpu_mem_counter(self):
+        if self._gpu_mem is None:
+            from ._perf import PerfCounter
+            # Dedicated VRAM in use (bytes), like Task Manager's "Dedicated GPU
+            # memory". Max across adapter instances = the primary GPU.
+            self._gpu_mem = PerfCounter(
+                r"\GPU Adapter Memory(*)\Dedicated Usage",
+                aggregate="max", clamp_percent=False)
+        return self._gpu_mem
+
+    def _gpu_total_vram(self):
+        if self._gpu_total is None:
+            from ._perf import gpu_total_vram_bytes
+            self._gpu_total = gpu_total_vram_bytes() or 0
+        return self._gpu_total
+
     @property
     def gpu_available(self) -> bool:
         return self._nvml_ok
@@ -245,15 +263,21 @@ class MetricsSampler:
         return Metric("cpu", "CPU", "percent", pct, detail=f"{cores} threads")
 
     def vram(self) -> Metric:
-        if not self._nvml_ok:
-            return Metric("vram", "VRAM", "bytes", available=False,
-                          detail="no NVIDIA GPU")
-        try:
-            info = self._nvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
-            return Metric("vram", "VRAM", "bytes", info.used, info.total,
-                          detail=self.gpu_name())
-        except Exception:
-            return Metric("vram", "VRAM", "bytes", available=False)
+        if self._nvml_ok:
+            try:
+                info = self._nvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
+                return Metric("vram", "VRAM", "bytes", info.used, info.total,
+                              detail=self.gpu_name())
+            except Exception:
+                pass
+        # Any-vendor fallback: dedicated VRAM in use (PDH) + total (registry),
+        # the same figures Task Manager shows — no driver, no admin.
+        used = self._gpu_mem_counter().value()
+        if used is not None:
+            total = self._gpu_total_vram()
+            return Metric("vram", "VRAM", "bytes", used, total, detail="dedicated")
+        return Metric("vram", "VRAM", "bytes", available=False,
+                      detail="no GPU counter")
 
     def gpu(self) -> Metric:
         if self._nvml_ok:

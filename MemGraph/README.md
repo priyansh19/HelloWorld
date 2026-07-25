@@ -107,8 +107,8 @@ the primary one drawn as the big graph.
 |---|---|---|
 | RAM | psutil | Always available |
 | CPU | psutil | Total utilisation |
-| VRAM | NVML (`nvidia-ml-py`) | NVIDIA only; else `n/a` |
-| GPU | NVML, else GPU-engine perf counter | Utilisation % |
+| VRAM | NVML, else PDH `GPU Adapter Memory` + registry total | Dedicated GPU memory, any vendor (same as Task Manager); no driver/admin |
+| GPU | NVML, else PDH `GPU Engine` | Compute/utilisation %, any vendor (same as Task Manager) |
 | NPU | Windows PDH perf counter | Best-effort (Windows 11); else `n/a` |
 | Process | psutil | Tracks e.g. `ollama.exe` (with/without `.exe`) |
 | CPU / Mem / GPU Temp | psutil sensors / NVML | Shown only when a sensor reports it |

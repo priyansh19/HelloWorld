@@ -27,14 +27,21 @@ class PerfCounter:
     Construct with a counter path; call :meth:`value` each tick. The first
     call after construction primes the query and may return ``None`` until a
     second sample exists (utilisation counters need two samples).
+
+    ``aggregate`` combines the wildcard instances: ``"max"`` (headline
+    utilisation, like Task Manager) or ``"sum"`` (e.g. total memory in use).
+    ``clamp_percent`` caps the result to 0-100 for percentage counters; set it
+    False for byte counters like GPU dedicated-memory usage.
     """
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, aggregate: str = "max",
+                 clamp_percent: bool = True) -> None:
         self._ok = False
         self._query = None
         self._counter = None
         self._pdh = None
-        self._structs = None
+        self._aggregate = aggregate
+        self._clamp = clamp_percent
         if not sys.platform.startswith("win"):
             return
         self._init(path)
@@ -106,16 +113,17 @@ class PerfCounter:
 
             items = ctypes.cast(
                 buf, ctypes.POINTER(self._item_type))
-            best = None
+            vals = []
             for i in range(count.value):
                 fv = items[i].FmtValue
                 if fv.CStatus == _PDH_CSTATUS_VALID_DATA:
-                    v = float(fv.doubleValue)
-                    if best is None or v > best:
-                        best = v
-            if best is None:
+                    vals.append(float(fv.doubleValue))
+            if not vals:
                 return None
-            return max(0.0, min(100.0, best))
+            agg = sum(vals) if self._aggregate == "sum" else max(vals)
+            if self._clamp:
+                return max(0.0, min(100.0, agg))
+            return max(0.0, agg)
         except Exception:
             return None
 
@@ -126,3 +134,45 @@ class PerfCounter:
         except Exception:
             pass
         self._ok = False
+
+
+# Display-adapter class GUID under HKLM\SYSTEM\...\Control\Class.
+_DISPLAY_CLASS = r"SYSTEM\CurrentControlSet\Control\Class" \
+    r"\{4d36e968-e325-11ce-bfc1-08002be10318}"
+
+
+def gpu_total_vram_bytes() -> Optional[int]:
+    """Total dedicated VRAM (bytes) of the largest GPU, from the driver's
+    registry entry (``HardwareInformation.qwMemorySize``). No admin needed.
+
+    This is where Task Manager gets the "Dedicated GPU memory" total for any
+    vendor. Returns ``None`` off-Windows or if unreadable.
+    """
+    if not sys.platform.startswith("win"):
+        return None
+    try:
+        import winreg
+        best = None
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _DISPLAY_CLASS) as base:
+            i = 0
+            while True:
+                try:
+                    sub = winreg.EnumKey(base, i)
+                except OSError:
+                    break
+                i += 1
+                if not sub.isdigit():
+                    continue
+                try:
+                    with winreg.OpenKey(base, sub) as k:
+                        raw, _ = winreg.QueryValueEx(
+                            k, "HardwareInformation.qwMemorySize")
+                    v = int.from_bytes(raw, "little") if isinstance(raw, bytes) \
+                        else int(raw)
+                    if v > 0 and (best is None or v > best):
+                        best = v
+                except OSError:
+                    continue
+        return best
+    except Exception:
+        return None
