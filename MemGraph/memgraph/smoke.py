@@ -1,11 +1,16 @@
 """Translucent RAM-pressure smoke plume for the car buddy.
 
-A full-screen, click-through, always-on-top overlay that emits soft grey smoke
-puffs from the car's exhaust. The puffs rise toward the top of the screen (the
-"ceiling"), drift, swell and fade — you can see straight through them. The
-plume's density and how wide it spreads scale with RAM stress (0..1): a light
-wisp when memory first runs hot, a screen-filling haze near 100%. Because the
-window is transparent to mouse input it never gets in the user's way.
+A click-through, always-on-top overlay hugging the taskbar that emits soft grey
+smoke puffs from the car's exhaust. Puffs rise only about two inches above the
+car, thinning as they climb and evaporating at that ceiling — a low, wide
+burnout cloud rather than a screen-filling one. Density and sideways spread
+scale with RAM stress (0..1), and everything stays translucent and transparent
+to mouse input so it never gets in the user's way.
+
+The overlay window is sized to just the smoke band (screen wide, a few hundred
+pixels tall) instead of the whole screen: repainting a translucent layered
+window costs proportionally to its area, and the full-screen version read as
+system-wide lag whenever the plume was active.
 
 Kept deliberately self-contained; the buddy widget feeds it a source point and
 an intensity each tick.
@@ -19,8 +24,10 @@ from dataclasses import dataclass
 from PySide6 import QtCore, QtGui, QtWidgets
 
 _FPS_MS = 33
-_MAX_PUFFS = 420          # hard cap so a pegged machine can't drown in puffs
+_MAX_PUFFS = 220          # hard cap so a pegged machine can't drown in puffs
 _BASE_ALPHA = 46          # peak per-puff alpha (out of 255) — very see-through
+_RISE_INCHES = 2.0        # how far above the exhaust the smoke may climb
+_BAND_HEADROOM = 90       # extra window pixels above the rise cap for puff radii
 
 
 @dataclass
@@ -36,7 +43,7 @@ class _Puff:
 
 
 class SmokeOverlay(QtWidgets.QWidget):
-    """A screen-sized transparent canvas that renders the rising smoke."""
+    """A taskbar-hugging transparent band that renders the rising smoke."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -55,16 +62,28 @@ class SmokeOverlay(QtWidgets.QWidget):
         self._intensity = 0.0
         self._spawn_acc = 0.0
         self._screen_geo = QtCore.QRect()
+        self._rise_px = 192.0
 
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self._step)
 
     # ------------------------------------------------------------------ #
     def cover_screen(self, geo: QtCore.QRect) -> None:
-        """Resize/move to span the whole screen the car is on."""
-        if geo != self._screen_geo:
-            self._screen_geo = QtCore.QRect(geo)
-            self.setGeometry(geo)
+        """Cover just the smoke band at the bottom of the given screen.
+
+        The rise cap is resolved in real inches via the screen's logical DPI,
+        and the window is a screen-wide strip tall enough for the cap plus a
+        little headroom — far cheaper to composite than a full-screen layer.
+        """
+        if geo == self._screen_geo:
+            return
+        self._screen_geo = QtCore.QRect(geo)
+        scr = QtGui.QGuiApplication.screenAt(geo.center())
+        dpi = float(scr.logicalDotsPerInch()) if scr else 96.0
+        self._rise_px = _RISE_INCHES * dpi
+        band_h = min(geo.height(), int(self._rise_px) + _BAND_HEADROOM)
+        self.setGeometry(geo.left(), geo.bottom() - band_h + 1,
+                         geo.width(), band_h)
 
     def set_source(self, gx: float, gy: float) -> None:
         """Exhaust tip in *global* coordinates."""
@@ -94,15 +113,16 @@ class SmokeOverlay(QtWidgets.QWidget):
             self._spawn_acc -= 1.0
             self._spawn(emit)
 
+        ceiling = self._src.y() - self._rise_px
         alive: list[_Puff] = []
         for p in self._puffs:
             p.age += dt
-            if p.age >= p.life or p.y + p.r < 0:
+            # gone: lived out, or evaporated past the two-inch ceiling
+            if p.age >= p.life or p.y + p.r < ceiling:
                 continue
-            # buoyant rise (accelerates a touch), swelling, lazy turbulence
-            p.vy -= 14.0 * dt
-            # turbulence grows with stress, and puffs keep fanning sideways as
-            # they climb so a pegged machine ends up hazing the whole screen.
+            # buoyant rise, swelling, lazy turbulence; sideways fanning grows
+            # with stress so a pegged machine gets a wide, LOW burnout cloud.
+            p.vy -= 10.0 * dt
             p.vx += random.uniform(-9.0, 9.0) * dt * (0.4 + 5.0 * s)
             p.vx *= (1.0 + 0.9 * s * dt)
             p.x += p.vx * dt
@@ -125,7 +145,9 @@ class SmokeOverlay(QtWidgets.QWidget):
             r=random.uniform(8, 15),
             grow=random.uniform(20, 40) * (1.0 + emit),
             age=0.0,
-            life=random.uniform(3.5, 6.5),
+            # short lives keep the cloud churning — fresh puffs appear and old
+            # ones clear quickly, so intensity changes read almost immediately
+            life=random.uniform(1.8, 3.4),
         ))
 
     # ------------------------------------------------------------------ #
@@ -133,15 +155,18 @@ class SmokeOverlay(QtWidgets.QWidget):
         if not self._puffs:
             return
         p = QtGui.QPainter(self)
-        p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        # No antialiasing: the radial gradients are soft-edged already, and
+        # skipping AA keeps this band cheap to repaint at 30 fps.
         p.setPen(QtCore.Qt.NoPen)
-        h = max(1, self.height())
+        rise = max(1.0, self._rise_px)
+        src_y = self._src.y()
         for pf in self._puffs:
             frac = pf.age / pf.life
-            fade = (1.0 - frac) * min(1.0, pf.age * 3.0)     # fade in then out
-            # thin further as it nears the ceiling ("evaporates in the sky")
-            ceil = max(0.0, min(1.0, pf.y / h))
-            a = int(_BASE_ALPHA * fade * (0.35 + 0.65 * ceil) * self._intensity)
+            fade = (1.0 - frac) * min(1.0, pf.age * 6.0)     # quick fade-in
+            # thin out as it climbs; fully evaporated at the two-inch cap
+            climb = max(0.0, min(1.0, (src_y - pf.y) / rise))
+            a = int(_BASE_ALPHA * fade * (1.0 - climb) ** 1.15
+                    * self._intensity)
             if a <= 1:
                 continue
             grad = QtGui.QRadialGradient(pf.x, pf.y, max(1.0, pf.r))

@@ -25,10 +25,10 @@ from pathlib import Path
 from PySide6 import QtCore, QtGui
 
 # Sizing units the widget multiplies by cfg.llama_scale; the height follows the
-# atlas aspect at load time. 44 units keeps the car small — about 180 px wide
-# at the default scale.
-SPRITE_W = 44
-SPRITE_H = 18          # provisional until an atlas is loaded
+# atlas aspect at load time. 97 units puts the car around 390 px wide at the
+# default scale (a 2.2x bump from the first cut, per user request).
+SPRITE_W = 97
+SPRITE_H = 40          # provisional until an atlas is loaded
 
 FRAMES = 8             # legacy shim for frames_for_gait
 IS_VECTOR = True       # tells the widget to use the image paint path
@@ -165,6 +165,20 @@ def frame_image(px_w: int, yaw_deg: float, spin_phase: float) -> QtGui.QImage | 
 
 
 # Legacy shims so LlamaBuddy can treat all sprite modules alike.
+def warm(px_w: int, yaws: list[int] | None = None) -> None:
+    """Pre-scale frames at ``px_w`` so painting never hits a scale on demand.
+
+    With no ``yaws`` given, warms the two driving headings (all wheel phases);
+    pass explicit indices to warm parts of the turn ring incrementally.
+    """
+    a = atlas()
+    if a is None:
+        return
+    for yi in (yaws if yaws is not None else (0, a.frames // 2)):
+        for si in range(a.spin_count(yi)):
+            a.frame(px_w, yi, si)
+
+
 def frames_for_gait(gait: str) -> list[int]:
     return list(range(FRAMES))
 

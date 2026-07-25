@@ -15,6 +15,7 @@ Click the llama to pop the full stat card; right-click for the mode menu.
 from __future__ import annotations
 
 import random
+import threading
 from typing import Callable, Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -40,7 +41,7 @@ def _sprite_module(character: str):
 _SCALE_BASE = 1.0      # px per sprite cell, multiplied by cfg.llama_scale
                        # (the tortoise sprite is high-resolution: 54x34 cells)
 _METRICS_MS = 1000
-_MOVE_MS = 30          # ~33 fps movement stepper
+_MOVE_MS = 16          # ~60 fps movement stepper (real dt measured per step)
 # Travel speed multiplier per gait. Kept close to 1 so the llama always strolls
 # at a visible, mild pace (CPU load just nudges it a bit faster).
 _GAIT_SPEED = {"idle": 0.85, "walk": 1.0, "gallop": 1.6}
@@ -88,6 +89,13 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._anim.timeout.connect(self._on_anim)
         self._anim.start(self._mood.frame_ms)
 
+        # Metrics are sampled in a daemon thread: the process-table scan can
+        # take >100 ms on a busy system, which reads as a once-a-second hitch
+        # in the car's motion if run on the GUI thread. tick() only consumes
+        # the latest sampled values.
+        self._sampled = (0.0, 0.0, False)
+        self._sampler_stop = threading.Event()
+        threading.Thread(target=self._sample_loop, daemon=True).start()
         self._metrics_timer = QtCore.QTimer(self)
         self._metrics_timer.timeout.connect(self.tick)
         self._metrics_timer.start(_METRICS_MS)
@@ -99,31 +107,46 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._driver = Driver(park_below=config.car_park_below)
         self._drive = DriveState(x=float(self.x()))
         # Smooth, high-frequency movement independent of the sprite cadence.
+        # PreciseTimer + measured dt: Windows coalesces coarse timers, and a
+        # fixed-dt assumption turns that jitter into visible speed surging.
+        self._move_clock = QtCore.QElapsedTimer()
+        self._move_clock.start()
         self._move_timer = QtCore.QTimer(self)
+        self._move_timer.setTimerType(QtCore.Qt.PreciseTimer)
         self._move_timer.timeout.connect(self._move_step)
         self._move_timer.start(_MOVE_MS)
+        self._warm_frames()
 
         self.tick()
 
     # ------------------------------------------------------------------ #
     # Live data → mood
     # ------------------------------------------------------------------ #
+    def _sample_loop(self) -> None:
+        """Daemon thread: keep the latest cpu/ram/process readings fresh."""
+        while not self._sampler_stop.wait(_METRICS_MS / 1000.0):
+            try:
+                cpu = self.sampler.cpu()
+                ram = self.sampler.ram()
+                proc = self.sampler.process(self.cfg.process_name)
+                self._sampled = (cpu.pct if cpu.available else 0.0,
+                                 ram.pct if ram.available else 0.0,
+                                 proc.available)
+            except Exception:
+                pass
+
     def tick(self) -> None:
-        cpu = self.sampler.cpu()
-        ram = self.sampler.ram()
-        proc = self.sampler.process(self.cfg.process_name)
-        cpu_pct = cpu.pct if cpu.available else 0.0
-        ram_pct = ram.pct if ram.available else 0.0
+        cpu_pct, ram_pct, proc_avail = self._sampled
         self._ram_pct = ram_pct
         self._update_fullscreen_visibility()
 
         self._mood = mood_for(cpu_pct, ram_pct, self.cfg.threshold_amber,
-                              self.cfg.threshold_red, proc.available)
+                              self.cfg.threshold_red, proc_avail)
         self._anim.setInterval(self._mood.frame_ms)
 
         tip = [f"RAM {ram_pct:.0f}%", f"CPU {cpu_pct:.0f}%"]
-        if proc.available:
-            tip.append(f"{self.cfg.process_name} {proc.pct:.0f}%")
+        if proc_avail:
+            tip.append(f"{self.cfg.process_name} running")
         self._tooltip = "  ·  ".join(tip)
         self.setToolTip(self._tooltip)
         self._update_smoke(self._mood.stress)
@@ -157,6 +180,27 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._dock()
         self._pos_x = float(self.x())
         self._drive.x = float(self.x())
+        self._warm_frames()
+
+    def _warm_frames(self) -> None:
+        """Pre-scale atlas frames for the current size so painting never has
+        to scale on demand — the first drift/turn stays hitch-free. The two
+        driving headings are warmed immediately; the rest of the turn ring is
+        spread across idle timer slots."""
+        if self._art is not car3d or not car3d.available():
+            return
+        sw, _ = self._sprite_units()
+        px_w = int(round(sw * self._scale))
+        car3d.warm(px_w)                     # driving headings, all spins
+        a = car3d.atlas()
+        pending = [y for y in range(a.frames) if y not in (0, a.frames // 2)]
+
+        def warm_next() -> None:
+            if pending:
+                car3d.warm(px_w, [pending.pop()])
+                QtCore.QTimer.singleShot(50, warm_next)
+
+        QtCore.QTimer.singleShot(200, warm_next)
 
     # ------------------------------------------------------------------ #
     # RAM "burnout" smoke (car character only)
@@ -245,12 +289,13 @@ class LlamaBuddy(QtWidgets.QWidget):
         if right <= left:
             return
 
+        dt = min(0.1, self._move_clock.restart() / 1000.0)
         if self._art is car3d:
             st = self._drive
             st.x = self._pos_x
             # Cruise pace: cross the screen in ~45 s; RAM adds up to ~2.6x.
             cruise = geo.width() / 45.0
-            self._driver.step(st, _MOVE_MS / 1000.0, self._ram_pct,
+            self._driver.step(st, dt, self._ram_pct,
                               float(left), float(right), cruise)
             self._pos_x = st.x
             self._facing = st.facing
@@ -268,7 +313,7 @@ class LlamaBuddy(QtWidgets.QWidget):
                 * self._ram_speed_mult(self._ram_pct))
         if self.cfg.buddy_character == "car":
             mult *= _CAR_DRIFT_SPEED
-        self._pos_x += self._facing * px_per_sec * mult * (_MOVE_MS / 1000.0)
+        self._pos_x += self._facing * px_per_sec * mult * dt
         if self._pos_x <= left:
             self._pos_x, self._facing = float(left), 1
         elif self._pos_x >= right:
