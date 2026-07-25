@@ -71,6 +71,9 @@ class Config:
     # Mustang that drifts along the taskbar and smokes when RAM burns.
     buddy_character: str = "car"   # "car" | "tortoise"
     car_smoke: bool = True         # translucent RAM-pressure smoke plume
+    # Below this RAM % the car parks at a screen corner; above it, it drifts
+    # (with a little hysteresis in the widget so it doesn't flap at the line).
+    car_park_below: int = 50
 
     # Colour thresholds (percent) for usage/memory metrics.
     threshold_amber: int = 70
@@ -115,6 +118,7 @@ class Config:
         self.llama_scale = _clamp_float(self.llama_scale, 0.8, 6.0, 4.05)
         if self.buddy_character not in ("car", "tortoise"):
             self.buddy_character = "car"
+        self.car_park_below = _clamp_int(self.car_park_below, 0, 100, 50)
 
         self.width = _clamp_int(self.width, 220, 1200, 288)
         self.height = _clamp_int(self.height, 140, 800, 220)

@@ -19,15 +19,23 @@ from typing import Callable, Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from . import buddy_logic, car_art
+from . import buddy_logic, car3d, car_art
 from .buddy_logic import mood_for
 from .config import Config
+from .drive_logic import Driver, DriveState
 from .metrics import MetricsSampler
 
 
 def _sprite_module(character: str):
-    """The art module for the chosen character ("tortoise" or "car")."""
-    return car_art if character == "car" else buddy_logic
+    """The art module for the chosen character ("tortoise" or "car").
+
+    The car prefers the baked 3D atlas (real model, yaw ring, spinning
+    wheels); the vector drawing remains as the fallback for source builds
+    without the baked assets.
+    """
+    if character == "car":
+        return car3d if car3d.available() else car_art
+    return buddy_logic
 
 _SCALE_BASE = 1.0      # px per sprite cell, multiplied by cfg.llama_scale
                        # (the tortoise sprite is high-resolution: 54x34 cells)
@@ -86,6 +94,10 @@ class LlamaBuddy(QtWidgets.QWidget):
 
         self._dock()
         self._pos_x = float(self.x())
+        # 3D car driving state (position/yaw/wheel spin), advanced pure-logic
+        # side so the park/drift behaviour is unit-testable.
+        self._driver = Driver(park_below=config.car_park_below)
+        self._drive = DriveState(x=float(self.x()))
         # Smooth, high-frequency movement independent of the sprite cadence.
         self._move_timer = QtCore.QTimer(self)
         self._move_timer.timeout.connect(self._move_step)
@@ -140,9 +152,11 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._recompute_size()
         if cfg.buddy_character != "car":
             self._stop_smoke()
+        self._driver = Driver(park_below=cfg.car_park_below)
         self.tick()
         self._dock()
         self._pos_x = float(self.x())
+        self._drive.x = float(self.x())
 
     # ------------------------------------------------------------------ #
     # RAM "burnout" smoke (car character only)
@@ -216,18 +230,38 @@ class LlamaBuddy(QtWidgets.QWidget):
         return min(2.0, 1.0 + 0.2 * bands)
 
     def _move_step(self) -> None:
-        """Walk steadily across the screen, turning around at each edge.
+        """Advance the buddy along the taskbar.
 
-        One full crossing takes ``llama_cross_seconds`` (~5 min) at a walk; gait
-        (CPU) and high RAM speed it up. The sprite mirrors to face its travel.
+        The 3D car runs the Driver state machine: parked at a corner below the
+        RAM line, drifting back and forth above it, sweeping its yaw through
+        the baked ring to turn around, wheels rolling with road speed. The
+        tortoise (and vector-car fallback) keeps the simple bounce walk.
         """
-        if not self.isVisible() or self._drag_x is not None \
-                or not self.cfg.llama_wander:
+        if not self.isVisible() or self._drag_x is not None:
             return
         geo = self._screen_geo()
         left = geo.left()
         right = geo.right() - self.width()
         if right <= left:
+            return
+
+        if self._art is car3d:
+            st = self._drive
+            st.x = self._pos_x
+            # Cruise pace: cross the screen in ~45 s; RAM adds up to ~2.6x.
+            cruise = geo.width() / 45.0
+            self._driver.step(st, _MOVE_MS / 1000.0, self._ram_pct,
+                              float(left), float(right), cruise)
+            self._pos_x = st.x
+            self._facing = st.facing
+            self.move(int(round(self._pos_x)), self.y())
+            if st.speed > 0 or st.turning:
+                self.update()             # yaw/wheels changed -> repaint
+            if self._smoke is not None and self._smoke.isVisible():
+                self._update_smoke(self._mood.stress)
+            return
+
+        if not self.cfg.llama_wander:
             return
         px_per_sec = geo.width() / max(20, self.cfg.llama_cross_seconds)
         mult = (_GAIT_SPEED.get(self._mood.gait, 1.0)
@@ -272,8 +306,21 @@ class LlamaBuddy(QtWidgets.QWidget):
         s = self._scale
         ox, oy = self._ox, float(self._pad_top)
 
-        # Vector characters (the Mustang) rasterise to a cached high-resolution
-        # image rather than a grid of cells.
+        # Baked 3D car: pick the frame for the current heading and wheel
+        # phase. No mirroring — the yaw ring covers every direction.
+        if art is car3d:
+            sw, sh = self._sprite_units()
+            w, h = sw * s, sh * s
+            st = self._drive
+            img = car3d.frame_image(int(round(w)), st.yaw,
+                                    self._driver.spin_phase(st))
+            if img is not None:
+                p.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
+                p.drawImage(QtCore.QRectF(ox, oy, w, h), img)
+            return
+
+        # Vector characters rasterise to a cached high-resolution image
+        # rather than a grid of cells.
         if getattr(art, "IS_VECTOR", False):
             sw, sh = self._sprite_units()
             w = sw * s
@@ -347,6 +394,8 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._drag_x = None
         self._press_pos = None
         self._pos_x = float(self.x())     # resume traversal from here
+        self._drive.x = self._pos_x
+        self._drive.park_side = 0         # re-choose the corner if parked
         if moved < 6:
             self.clicked.emit()
         else:

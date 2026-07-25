@@ -60,28 +60,83 @@ const pivot = new THREE.Group();
 scene.add(pivot);
 
 window.__ready = false;
+const WHEEL_RE = /wheel|tire|tyre|rim|rotor/i;
+const NOT_WHEEL_RE = /calliper|caliper|arch|well|housing|guard/i;
+
 new GLTFLoader().load('./model.glb', (gltf) => {
   const model = gltf.scene;
+  model.updateMatrixWorld(true);
 
-  // Centre the model on its own bounding box, then scale so its longest
-  // horizontal axis fits the frame with a small margin.
-  const box = new THREE.Box3().setFromObject(model);
-  const size = box.getSize(new THREE.Vector3());
+  // Orient so the car's longest horizontal axis runs along X (screen
+  // horizontal). Models exported from FBX often arrive facing along Z.
+  let box = new THREE.Box3().setFromObject(model);
+  let size = box.getSize(new THREE.Vector3());
+  if (size.z > size.x) {
+    model.rotation.y = Math.PI / 2;
+    model.updateMatrixWorld(true);
+    box = new THREE.Box3().setFromObject(model);
+    size = box.getSize(new THREE.Vector3());
+  }
+
+  // Centre on the bounding box so yaw spins about the car's own middle.
   const centre = box.getCenter(new THREE.Vector3());
+  const holder = new THREE.Group();
+  holder.add(model);
   model.position.sub(centre);
-  pivot.add(model);
+  pivot.add(holder);
+  holder.updateMatrixWorld(true);
 
-  const radius = Math.max(size.x, size.z) * 0.5;   // worst case when rotated
-  const halfW = radius * 1.04;
-  const halfH = (size.y * 0.5) * 1.10;
-  camera.left = -halfW; camera.right = halfW;
-  camera.top = halfH;   camera.bottom = -halfH;
-  camera.position.set(0, 0, radius * 4 + size.z);
+  // ---- wheels -------------------------------------------------------
+  // Names in real models are unreliable (this one buries all four wheels
+  // under a single "Combined" node), so pick wheel-ish meshes by name and
+  // then cluster them into four quadrants by position. Each cluster gets a
+  // pivot at its own hub centre, and rolls about the lateral axis (Z).
+  const candidates = [];
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    const n = (o.name || '') + '|' + ((o.parent && o.parent.name) || '');
+    if (WHEEL_RE.test(n) && !NOT_WHEEL_RE.test(n)) candidates.push(o);
+  });
+
+  const wheelPivots = [];
+  if (candidates.length) {
+    const buckets = new Map();
+    const tmp = new THREE.Box3();
+    const c = new THREE.Vector3();
+    for (const m of candidates) {
+      tmp.setFromObject(m);
+      if (tmp.isEmpty()) continue;
+      tmp.getCenter(c);
+      const key = (c.x >= 0 ? 'F' : 'R') + (c.z >= 0 ? 'L' : 'R');
+      if (!buckets.has(key)) buckets.set(key, {meshes: [], sum: new THREE.Vector3(), n: 0});
+      const b = buckets.get(key);
+      b.meshes.push(m); b.sum.add(c); b.n++;
+    }
+    for (const b of buckets.values()) {
+      const hub = b.sum.clone().divideScalar(Math.max(1, b.n));
+      const wp = new THREE.Group();
+      wp.position.copy(hub);
+      holder.add(wp);
+      wp.updateMatrixWorld(true);
+      for (const m of b.meshes) wp.attach(m);   // preserves world transform
+      wheelPivots.push(wp);
+    }
+  }
+  window.__wheelCount = wheelPivots.length;
+
+  // ---- camera -------------------------------------------------------
+  // Frame for the worst case so the car never clips while rotating.
+  const radius = Math.max(size.x, size.z) * 0.5;
+  camera.left = -radius * 1.04; camera.right = radius * 1.04;
+  camera.top = size.y * 0.62;   camera.bottom = -size.y * 0.62;
+  camera.position.set(0, 0, radius * 6);
   camera.lookAt(0, 0, 0);
   camera.updateProjectionMatrix();
 
-  window.__setYaw = (deg) => {
-    pivot.rotation.y = deg * Math.PI / 180;
+  window.__setPose = (yawDeg, spinDeg) => {
+    pivot.rotation.y = yawDeg * Math.PI / 180;
+    const s = spinDeg * Math.PI / 180;
+    for (const wp of wheelPivots) wp.rotation.z = s;
     renderer.render(scene, camera);
   };
   window.__ready = true;
@@ -97,6 +152,19 @@ def main() -> int:
                     help="output directory for the frames")
     ap.add_argument("--frames", type=int, default=24,
                     help="yaw angles around the car (default 24)")
+    ap.add_argument("--spins", type=int, default=6,
+                    help="wheel-rotation phases, applied only at the driving "
+                         "yaw angles (default 6)")
+    ap.add_argument("--spin-yaws", default="all",
+                    help="yaw angles (degrees) that get spin phases, or 'all' "
+                         "(default) so the wheels turn at every heading")
+    ap.add_argument("--format", default="webp", choices=("webp", "png"),
+                    help="frame format; webp is ~4x smaller with alpha intact")
+    ap.add_argument("--quality", type=int, default=92,
+                    help="webp quality (default 92)")
+    ap.add_argument("--spin-arc", type=float, default=72.0,
+                    help="degrees the wheel sweeps across the spin phases; "
+                         "one spoke pitch, so 72 for a 5-spoke rim")
     ap.add_argument("--width", type=int, default=640,
                     help="frame width in pixels (default 640)")
     ap.add_argument("--height", type=int, default=260)
@@ -135,6 +203,11 @@ def main() -> int:
         encoding="utf-8")
 
     frames = max(1, args.frames)
+    spins = max(1, args.spins)
+    spin_counts: dict[int, int] = {}
+    # Screenshots always land as PNG; convert afterwards if webp was asked for.
+    shot_dir = out if args.format == "png" else (out / ".png")
+    shot_dir.mkdir(parents=True, exist_ok=True)
     # ES modules are blocked by CORS over file://, so serve the stage locally.
     server, port = _serve(stage)
     try:
@@ -153,26 +226,107 @@ def main() -> int:
                 print(f"model failed to load: {err}", file=sys.stderr)
                 browser.close()
                 return 1
+            wheels = page.evaluate("window.__wheelCount || 0")
+            print(f"wheel groups found: {wheels}")
+            # Yaw indices that get several wheel phases: the side-on headings.
+            all_yaws = str(args.spin_yaws).strip().lower() == "all"
+            spin_idx = set()
+            if not all_yaws:
+                for deg in str(args.spin_yaws).split(","):
+                    deg = deg.strip()
+                    if deg:
+                        spin_idx.add(round(float(deg) / 360.0 * frames) % frames)
             for i in range(frames):
                 yaw = 360.0 * i / frames
-                page.evaluate(f"window.__setYaw({yaw})")
-                page.screenshot(path=str(out / f"car_{i:02d}.png"),
-                                omit_background=True)
+                n = spins if (all_yaws or i in spin_idx) else 1
+                for j in range(n):
+                    spin = args.spin_arc * j / n
+                    page.evaluate(f"window.__setPose({yaw}, {spin})")
+                    page.screenshot(path=str(shot_dir / f"car_{i:02d}_{j:02d}.png"),
+                                    omit_background=True)
+                spin_counts[i] = n
             browser.close()
     finally:
         server.shutdown()
 
-    ex = [float(v) for v in args.exhaust.split(",")]
+    if args.format == "webp":
+        _to_webp(shot_dir, out, args.quality)
+        shutil.rmtree(shot_dir, ignore_errors=True)
+    ext = args.format
+    ex = _exhaust_anchor(out / f"car_00_00.{ext}", args.exhaust)
     (out / "atlas.json").write_text(json.dumps({
         "frames": frames,
+        "spin_counts": {str(k): v for k, v in sorted(spin_counts.items())},
+        "spin_arc": args.spin_arc,
         "width": args.width,
         "height": args.height,
         "exhaust": {"x": ex[0], "y": ex[1]},
-        "note": "frame 0 faces +X; yaw increases counter-clockwise",
+        "pattern": "car_{yaw:02d}_{spin:02d}." + ext,
+        "note": "yaw 0 faces +X (screen right); yaw increases counter-clockwise",
     }, indent=2), encoding="utf-8")
     shutil.rmtree(stage, ignore_errors=True)
     print(f"wrote {frames} frames to {out}")
     return 0
+
+
+def _to_webp(src_dir: Path, dst_dir: Path, quality: int) -> None:
+    """Re-encode the PNG screenshots as WebP — same alpha, about a quarter the
+    size, which keeps the shipped atlas small."""
+    import os as _os
+    _os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6 import QtGui
+    QtGui.QGuiApplication.instance() or QtGui.QGuiApplication([])
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    for png in sorted(src_dir.glob("car_*.png")):
+        img = QtGui.QImage(str(png))
+        if img.isNull():
+            continue
+        img.save(str(dst_dir / (png.stem + ".webp")), "WEBP", quality)
+
+
+def _convert_to_webp(out: Path) -> None:
+    import os as _os
+    _os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6 import QtGui
+    app = QtGui.QGuiApplication.instance() or QtGui.QGuiApplication([])
+    for png in sorted(out.glob("car_*.png")):
+        img = QtGui.QImage(str(png))
+        if img.isNull():
+            continue
+        if img.save(str(png.with_suffix(".webp")), "WEBP", 90):
+            png.unlink()
+
+
+def _exhaust_anchor(side_frame: Path, fallback: str) -> tuple[float, float]:
+    """Locate the exhaust as fractions of the frame.
+
+    The side-on frame has the car's tail at screen left, so the tips sit just
+    inside the opaque bounding box at the bottom-left. Measuring the box beats
+    hardcoding, because the model's margin depends on its proportions.
+    """
+    try:
+        import os as _os
+        _os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6 import QtGui
+        app = QtGui.QGuiApplication.instance() or QtGui.QGuiApplication([])
+        img = QtGui.QImage(str(side_frame))
+        if img.isNull():
+            raise ValueError
+        w, h = img.width(), img.height()
+        x0, y1 = w, -1
+        for y in range(h):
+            for x in range(w):
+                if img.pixelColor(x, y).alpha() > 16:
+                    if x < x0:
+                        x0 = x
+                    if y > y1:
+                        y1 = y
+        if x0 >= w or y1 < 0:
+            raise ValueError
+        return ((x0 + 0.03 * w) / w, (y1 - 0.06 * h) / h)
+    except Exception:
+        vals = [float(v) for v in str(fallback).split(",")]
+        return vals[0], vals[1]
 
 
 def _serve(directory: Path):
