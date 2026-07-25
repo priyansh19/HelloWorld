@@ -159,6 +159,13 @@ class SettingsDialog(QtWidgets.QDialog):
         self.spin_cross.setValue(max(1, round(self._cfg.llama_cross_seconds / 60)))
         form.addRow("Llama speed:", self.spin_cross)
 
+        self.spin_scale = QtWidgets.QDoubleSpinBox()
+        self.spin_scale.setRange(1.0, 4.0)
+        self.spin_scale.setSingleStep(0.2)
+        self.spin_scale.setSuffix("×")
+        self.spin_scale.setValue(self._cfg.llama_scale)
+        form.addRow("Llama size:", self.spin_scale)
+
         self.spin_peek = QtWidgets.QSpinBox()
         self.spin_peek.setRange(10, 600)
         self.spin_peek.setSingleStep(10)
@@ -209,6 +216,7 @@ class SettingsDialog(QtWidgets.QDialog):
             peek_seconds=self.spin_peek.value(),
             llama_wander=self.chk_wander.isChecked(),
             llama_cross_seconds=self.spin_cross.value() * 60,
+            llama_scale=self.spin_scale.value(),
             compact=self.chk_compact.isChecked(),
             always_on_top=self.chk_ontop.isChecked(),
             snap_to_edges=self.chk_snap.isChecked(),

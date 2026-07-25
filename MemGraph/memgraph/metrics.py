@@ -156,6 +156,7 @@ class MetricsSampler:
         self._gpu_total = None      # total VRAM bytes (registry) | None
         self._wtemps = None         # WinTemps | None (lazy)
         self._lhm = None            # LhmReader | None (lazy)
+        self._wcounters = None      # WinCounters (Get-Counter) | None (lazy)
         self._init_psutil()
         self._init_nvml()
 
@@ -165,6 +166,13 @@ class MetricsSampler:
             from ._wintemp import WinTemps
             self._wtemps = WinTemps()
         return self._wtemps
+
+    def _win_counters(self):
+        """Lazily start the Get-Counter GPU/NPU/VRAM poller."""
+        if self._wcounters is None:
+            from ._wincounters import WinCounters
+            self._wcounters = WinCounters()
+        return self._wcounters
 
     def _lhm_reader(self):
         """Lazily start the in-process LibreHardwareMonitor reader."""
@@ -270,9 +278,11 @@ class MetricsSampler:
                               detail=self.gpu_name())
             except Exception:
                 pass
-        # Any-vendor fallback: dedicated VRAM in use (PDH) + total (registry),
-        # the same figures Task Manager shows — no driver, no admin.
-        used = self._gpu_mem_counter().value()
+        # Any-vendor: dedicated VRAM in use (Get-Counter, else PDH) + total from
+        # the driver registry — the same figures Task Manager shows.
+        used = self._win_counters().get().get("vram")
+        if used is None:
+            used = self._gpu_mem_counter().value()
         if used is not None:
             total = self._gpu_total_vram()
             return Metric("vram", "VRAM", "bytes", used, total, detail="dedicated")
@@ -287,15 +297,19 @@ class MetricsSampler:
                               detail=self.gpu_name())
             except Exception:
                 pass
-        # Fallback: Windows GPU-engine perf counter (any vendor).
-        val = self._gpu_engine_counter().value()
+        # Any-vendor: Get-Counter GPU Engine (else PDH), like Task Manager.
+        val = self._win_counters().get().get("gpu")
+        if val is None:
+            val = self._gpu_engine_counter().value()
         if val is not None:
             return Metric("gpu", "GPU", "percent", val)
         return Metric("gpu", "GPU", "percent", available=False,
                       detail="no GPU counter")
 
     def npu(self) -> Metric:
-        val = self._npu_counter().value()
+        val = self._win_counters().get().get("npu")
+        if val is None:
+            val = self._npu_counter().value()
         if val is not None:
             return Metric("npu", "NPU", "percent", val)
         return Metric("npu", "NPU", "percent", available=False,

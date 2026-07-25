@@ -32,12 +32,12 @@ from .buddy_logic import (
 from .config import Config
 from .metrics import MetricsSampler
 
-_SCALE = 3.0
-_PAD_TOP = 14          # headroom for the "!!" and sweat drop
+_SCALE_BASE = 3.0      # multiplied by cfg.llama_scale
 _METRICS_MS = 1000
 _MOVE_MS = 30          # ~33 fps movement stepper
-# Travel speed multiplier per gait — CPU load makes the llama cross faster.
-_GAIT_SPEED = {"idle": 0.65, "walk": 1.0, "gallop": 2.4}
+# Travel speed multiplier per gait. Kept close to 1 so the llama always strolls
+# at a visible, mild pace (CPU load just nudges it a bit faster).
+_GAIT_SPEED = {"idle": 0.85, "walk": 1.0, "gallop": 1.6}
 
 
 class LlamaBuddy(QtWidgets.QWidget):
@@ -56,9 +56,9 @@ class LlamaBuddy(QtWidgets.QWidget):
         self.setWindowFlags(QtCore.Qt.FramelessWindowHint | QtCore.Qt.Tool |
                             QtCore.Qt.WindowStaysOnTopHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
-        w = int(SPRITE_W * _SCALE)
-        h = int(SPRITE_H * _SCALE) + _PAD_TOP
-        self.setFixedSize(w + 12, h)
+        self._scale = _SCALE_BASE * config.llama_scale
+        self._pad_top = int(6 * config.llama_scale)  # headroom for "!!"/sweat
+        self._recompute_size()
 
         self._mood = mood_for(0, 0, config.threshold_amber,
                               config.threshold_red, False)
@@ -107,8 +107,17 @@ class LlamaBuddy(QtWidgets.QWidget):
         self.setToolTip(self._tooltip)
         self.update()
 
+    def _recompute_size(self) -> None:
+        self._ox = 6.0
+        w = int(SPRITE_W * self._scale + 2 * self._ox)
+        h = int(SPRITE_H * self._scale) + self._pad_top
+        self.setFixedSize(w, h)
+
     def apply_config(self, cfg: Config) -> None:
         self.cfg = cfg
+        self._scale = _SCALE_BASE * cfg.llama_scale
+        self._pad_top = int(6 * cfg.llama_scale)
+        self._recompute_size()
         self.tick()
         self._dock()
         self._pos_x = float(self.x())
@@ -178,8 +187,8 @@ class LlamaBuddy(QtWidgets.QWidget):
                               blink=self._blink and not m.shades)
 
         p = QtGui.QPainter(self)
-        s = _SCALE
-        ox, oy = 6.0, float(_PAD_TOP)
+        s = self._scale
+        ox, oy = self._ox, float(self._pad_top)
         tint = QtGui.QColor(PANIC_TINT) if m.panic else None
         for ry, row in enumerate(rows):
             for rx, ch in enumerate(row):
