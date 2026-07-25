@@ -23,8 +23,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-TURN_RATE = 460.0        # deg/s the yaw sweeps during a turn-around
-DONUT_RATE = 560.0       # deg/s during a donut — a drift spin is quicker
+TURN_RATE = 620.0        # deg/s the yaw sweeps during a turn-around
+DONUT_RATE = 760.0       # deg/s during a donut — a drift spin is quicker
 PARK_HYSTERESIS = 2.0    # RAM % band around park_below
 ARRIVE_PX = 3.0          # close enough to the parking spot to stop
 

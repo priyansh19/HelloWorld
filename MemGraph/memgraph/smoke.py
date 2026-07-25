@@ -25,7 +25,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 _FPS_MS = 33
 _MAX_PUFFS = 220          # hard cap so a pegged machine can't drown in puffs
-_BASE_ALPHA = 46          # peak per-puff alpha (out of 255) — very see-through
+_BASE_ALPHA = 30          # peak per-puff alpha (out of 255) — very see-through
 _RISE_INCHES = 2.0        # how far above the exhaust the smoke may climb
 _BAND_HEADROOM = 90       # extra window pixels above the rise cap for puff radii
 

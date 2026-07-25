@@ -301,8 +301,8 @@ class LlamaBuddy(QtWidgets.QWidget):
         if self._art is car3d:
             st = self._drive
             st.x = self._pos_x
-            # Cruise pace: cross the screen in ~45 s; RAM adds up to ~2.6x.
-            cruise = geo.width() / 45.0
+            # Cruise pace: cross the screen in ~18 s; RAM adds up to ~2.6x.
+            cruise = geo.width() / 18.0
             self._driver.step(st, dt, self._ram_pct,
                               float(left), float(right), cruise)
             self._pos_x = st.x
