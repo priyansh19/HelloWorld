@@ -71,15 +71,19 @@ def _build(t: int) -> list[str]:
         if 0 <= x < _W and 0 <= y < _H:
             g[y][x] = c
 
-    # Carapace geometry: a tall rounded dome sitting high on the legs.
-    cx, cy, rx, ry = 24.0, 16.0, 20.0, 13.5
+    # Carapace geometry: a tall dome whose rounded bottom skirt dips down over
+    # the tops of the legs, so there's no open gap between shell and legs.
+    cx, cy, rx, ry = 24.0, 17.0, 20.0, 14.0
+    shell_bottom = 26            # how far the rounded skirt reaches down
 
     # ---- Legs: four tapered elephantine columns with toe-nails -----------
     # (x0, phase-offset, near?) — near legs are the lighter grey.
     def draw_leg(x0, off, near):
         lift, dx = _leg_phase((t / _FRAMES + off) % 1.0)
         x = x0 + int(round(dx))
-        top, bottom = 25, 34 - int(round(lift * 5))
+        # start the legs up under the shell so their tops are hidden by the
+        # rounded skirt and no gap shows between body and legs.
+        top, bottom = 22, 34 - int(round(lift * 5))
         span = max(1, bottom - top)
         body = "L" if near else "l"
         for i, yy in enumerate(range(top, bottom)):
@@ -150,7 +154,7 @@ def _build(t: int) -> list[str]:
     for y in range(_H):
         for x in range(_W):
             nx, ny = (x - cx) / rx, (y - cy) / ry
-            if nx * nx + ny * ny <= 1.0 and y <= cy + 4:
+            if nx * nx + ny * ny <= 1.0 and y <= shell_bottom:
                 nz = math.sqrt(max(0.0, 1 - nx * nx - ny * ny))
                 l = nx * lx + ny * ly + nz * lz
                 g[y][x] = ("r" if l > 0.80 else "g" if l > 0.55
