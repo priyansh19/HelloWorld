@@ -19,7 +19,7 @@ from typing import Callable, Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from . import buddy_logic, car_logic
+from . import buddy_logic, car_art
 from .buddy_logic import mood_for
 from .config import Config
 from .metrics import MetricsSampler
@@ -27,7 +27,7 @@ from .metrics import MetricsSampler
 
 def _sprite_module(character: str):
     """The art module for the chosen character ("tortoise" or "car")."""
-    return car_logic if character == "car" else buddy_logic
+    return car_art if character == "car" else buddy_logic
 
 _SCALE_BASE = 1.0      # px per sprite cell, multiplied by cfg.llama_scale
                        # (the tortoise sprite is high-resolution: 54x34 cells)
@@ -259,16 +259,31 @@ class LlamaBuddy(QtWidgets.QWidget):
     def paintEvent(self, _e: QtGui.QPaintEvent) -> None:
         m = self._mood
         art = self._art
+        p = QtGui.QPainter(self)
+        s = self._scale
+        ox, oy = self._ox, float(self._pad_top)
+
+        # Vector characters (the Mustang) rasterise to a cached high-resolution
+        # image rather than a grid of cells.
+        if getattr(art, "IS_VECTOR", False):
+            w = art.SPRITE_W * s
+            h = art.SPRITE_H * s
+            img = art.render_image(int(round(w)), self._frame_i)
+            p.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
+            p.save()
+            if self._facing == -1:            # mirror to face its travel
+                p.translate(self.width(), 0)
+                p.scale(-1, 1)
+            p.drawImage(QtCore.QRectF(ox, oy, w, h), img)
+            p.restore()
+            return
+
         frames = art.frames_for_gait(m.gait)
         rows = frames[self._frame_i % len(frames)]
         rows = art.apply_overlays(rows, shades=m.shades,
                                   blink=self._blink and not m.shades)
         PALETTE, PANIC_TINT = art.PALETTE, art.PANIC_TINT
         TINT_EXEMPT, SPRITE_W = art.TINT_EXEMPT, art.SPRITE_W
-
-        p = QtGui.QPainter(self)
-        s = self._scale
-        ox, oy = self._ox, float(self._pad_top)
         # RAM alarm: blend toward red by the stress level (face/legs/shell).
         amt = min(0.85, m.stress * 0.85)
         tint = QtGui.QColor(PANIC_TINT)
