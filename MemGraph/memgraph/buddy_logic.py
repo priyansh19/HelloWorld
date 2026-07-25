@@ -2,18 +2,25 @@
 
 Qt-free so the buddy's personality is unit-testable. The tortoise is generated
 procedurally into an 8-frame walk cycle modelled on a real Galapagos giant
-tortoise: a high, rounded olive/khaki-green carapace divided into rectangular
-scute plates (raised centres, dark grooves), a long grey scaly neck ending in a
-hooked beak, and four thick elephantine grey legs with stubby toes that lift,
-swing and plant. The widget rasterises the character grids with QPainter (no
-image assets).
+tortoise:
+
+* a high, rounded olive/khaki carapace shaded with a five-step highlight ->
+  core-shadow ramp (a lit dome, not flat facets) plus a specular glint;
+* large, beveled scute plates — a central vertebral column flanked by costal
+  rows, each plate raised with an ambient-occlusion groove around it;
+* the shell overhangs and casts a contact shadow onto the body/legs;
+* a long grey scaly neck (with skin wrinkles) ending in a wedge head — brow
+  ridge, nostril and a pronounced hooked beak;
+* four thick elephantine grey legs that *taper* from shoulder to foot, each a
+  shaded column with stubby toe-nails, lifting/swinging/planting in the cycle.
+
+The widget rasterises the character grids with QPainter (no image assets).
 
 Palette legend:
-``g/G/d`` shell scute facets (lit/mid/shadow olive-green) · ``r`` raised scute
-highlight · ``s`` scute groove/seam · ``o`` shell outline · ``n/N`` neck/head
-skin (grey, lit/shadow) · ``b`` beak · ``L/l`` legs (grey, lit/shadow) · ``k``
-foot/toe shadow · ``y`` plastron (yellow-tan belly) · ``e`` eye-white · ``p``
-pupil · ``S`` sunglasses · ``W`` lens glint · ``.`` transparent
+``r`` shell specular · ``g/G/d/D`` carapace ramp (lit->core shadow) · ``s``
+scute groove · ``o`` shell outline · ``n/N`` neck+head skin (lit/shadow) · ``b``
+beak · ``L/l`` legs (lit/shadow) · ``k`` toe/contact shadow · ``y`` plastron ·
+``e`` eye-white · ``p`` pupil · ``S`` sunglasses · ``W`` lens glint · ``.`` clear
 """
 
 from __future__ import annotations
@@ -22,13 +29,13 @@ import math
 from dataclasses import dataclass
 
 PALETTE = {
-    # Carapace: olive / khaki green, faceted by the dome's curvature.
-    "g": "#8f9a54", "G": "#6f7a3e", "d": "#515a2b", "r": "#a7b167",
-    "s": "#39401f", "o": "#2a2f16",
-    # Neck & head: grey, scaly reptilian skin.
-    "n": "#9a9c96", "N": "#6f716c", "b": "#4a4b46",
-    # Legs: grey, a touch darker/warmer than the neck; toes in deep shadow.
-    "L": "#8b8d86", "l": "#63655f", "k": "#3b3c37",
+    # Carapace: olive/khaki, five-step lit-dome ramp + specular highlight.
+    "r": "#b7c179", "g": "#8f9a54", "G": "#6f7a3e", "d": "#515a2b",
+    "D": "#3b4320", "s": "#333a1c", "o": "#232811",
+    # Neck & head: grey scaly reptilian skin (lit / shadow) + horny beak.
+    "n": "#a2a49d", "N": "#6f716b", "b": "#45463f",
+    # Legs: grey tapered columns; toe-nails / contact shadow in deep grey.
+    "L": "#8b8d86", "l": "#5f615b", "k": "#33342f",
     # Plastron (belly) peeking below the shell.
     "y": "#c7b56e",
     # Face + accessories.
@@ -37,9 +44,9 @@ PALETTE = {
 
 PANIC_TINT = "#ff5470"
 # Under the RAM alarm only the soft body flushes red — the head/face, tail and
-# legs. The shell keeps its olive colour, and eyes/shades stay as-is. So every
-# shell glyph (g/G/d/r/s/o) plus the eye/shade glyphs are exempt from the tint.
-TINT_EXEMPT = set("epSW") | set("gGdrso")
+# legs. The shell keeps its olive colour, and eyes/shades stay as-is. Every
+# shell glyph plus the eye/shade glyphs are exempt from the tint.
+TINT_EXEMPT = set("epSW") | set("rgGdDso")
 
 _W, _H = 60, 38
 _FRAMES = 8
@@ -65,106 +72,120 @@ def _build(t: int) -> list[str]:
             g[y][x] = c
 
     # Carapace geometry: a tall rounded dome sitting high on the legs.
-    cx, cy, rx, ry = 25.0, 17.0, 20.0, 13.5
+    cx, cy, rx, ry = 24.0, 16.0, 20.0, 13.5
 
-    # ---- Legs: four thick elephantine columns with stubby toes -----------
-    # (x0, near?) — near legs (front-right, back-right to viewer) are lighter.
-    for x0, off, near in ((9, 0.0, False), (18, 0.5, True),
-                          (31, 0.5, True), (40, 0.0, False)):
+    # ---- Legs: four tapered elephantine columns with toe-nails -----------
+    # (x0, phase-offset, near?) — near legs are the lighter grey.
+    def draw_leg(x0, off, near):
         lift, dx = _leg_phase((t / _FRAMES + off) % 1.0)
         x = x0 + int(round(dx))
-        bottom = 34 - int(round(lift * 5))
-        body, shad = ("L", "l") if near else ("l", "k")
-        for yy in range(24, bottom):
-            for xx in range(x, x + 7):
-                # round the outer edge of the column slightly
-                edge = xx == x or xx == x + 6
-                put(xx, yy, shad if edge else body)
-        # foot + three stubby toes
-        for xx in range(x, x + 7):
+        top, bottom = 25, 34 - int(round(lift * 5))
+        span = max(1, bottom - top)
+        body = "L" if near else "l"
+        for i, yy in enumerate(range(top, bottom)):
+            frac = i / span
+            w = int(round(8 - 3 * frac))          # 8 wide at shoulder -> 5 foot
+            lx = x + (8 - w) // 2
+            for j in range(w):
+                xx = lx + j
+                edge = j == 0 or j == w - 1
+                put(xx, yy, "l" if (edge or not near) and j != w // 2 else body)
+        # foot pad + three stubby toe-nails
+        for xx in range(x + 1, x + 7):
             put(xx, bottom, "k")
         for tx in (x + 1, x + 3, x + 5):
             put(tx, bottom + 1, "k")
 
+    for x0, off, near in ((8, 0.0, False), (16, 0.5, True),
+                          (30, 0.0, True), (39, 0.5, False)):
+        draw_leg(x0, off, near)
+
     # ---- Plastron: a sliver of yellow-tan belly below the shell ----------
     for y in range(24, 28):
-        for x in range(18, 34):
-            if ((x - 26) / 9) ** 2 + ((y - 25) / 3) ** 2 <= 1.0:
+        for x in range(16, 34):
+            if ((x - 25) / 10) ** 2 + ((y - 25) / 3) ** 2 <= 1.0:
                 put(x, y, "y")
 
-    # ---- Neck + head: long grey scaly neck, hooked beak ------------------
-    for y in range(15, 24):                      # neck, thickening downward
-        for x in range(38, 48):
-            t2 = (x - 38) / 10.0
-            half = 2.5 + 2.5 * t2
-            if abs(y - (19 + 1.5 * t2)) <= half:
+    # ---- Neck + head: long grey scaly neck, wedge head, hooked beak ------
+    for y in range(14, 24):                      # neck, thickening downward
+        for x in range(37, 48):
+            t2 = (x - 37) / 11.0
+            half = 2.0 + 3.0 * t2
+            if abs(y - (18 + 2.0 * t2)) <= half:
                 if g[y][x] == ".":
                     put(x, y, "n")
-    hx, hy, hrx, hry = 50.0, 17.0, 7.0, 5.5      # head
+    hx, hy, hrx, hry = 51.0, 16.0, 7.5, 5.5      # head (wedge — flatter top)
     for y in range(_H):
         for x in range(_W):
-            if ((x - hx) / hrx) ** 2 + ((y - hy) / hry) ** 2 <= 1.0:
+            ny = (y - hy) / (hry * (0.8 if y < hy else 1.0))
+            if ((x - hx) / hrx) ** 2 + ny ** 2 <= 1.0:
                 put(x, y, "n")
-    # shade the underside of neck/head for volume
+    # volume shading: underside of neck & head to shadow grey
     for y in range(_H):
         for x in range(_W):
-            if g[y][x] == "n" and (y >= 20 or (y > hy and (x - hx) ** 2
-                                    + ((y - hy) * 1.3) ** 2 > 20)):
+            if g[y][x] == "n" and (y >= 20 or (y > hy + 1)
+                                   or (x < 40 and y > 19)):
                 g[y][x] = "N"
-    # hooked beak jutting forward, mouth line
-    put(57, 16, "b"); put(58, 17, "b"); put(57, 18, "b")
-    put(56, 18, "b"); put(55, 19, "N")
-    # eye
-    put(53, 15, "e"); put(54, 15, "p")
+    for wy in (16, 19, 22):                        # a few neck skin-wrinkles
+        for x in range(38, 46, 2):
+            if g[wy][x] == "n":
+                put(x, wy, "N")
+    # brow ridge, eye, nostril, hooked beak
+    for x in range(50, 55):
+        if g[13][x] == "n":
+            put(x, 13, "N")
+    put(53, 15, "e"); put(54, 15, "p")            # round eye
+    put(56, 15, "N")                              # nostril
+    put(57, 15, "b"); put(58, 16, "b"); put(58, 17, "b")   # hook
+    put(57, 18, "b"); put(56, 18, "N")            # mouth line
 
     # ---- Short tail on the left -----------------------------------------
-    for i, y in enumerate(range(19, 22)):
-        for x in range(4, 4 + (4 - i)):
+    for i, y in enumerate(range(18, 21)):
+        for x in range(3, 3 + (4 - i)):
             if g[y][x] == ".":
                 put(x, y, "N")
 
-    # ---- Carapace: faceted olive dome ------------------------------------
-    lx, ly, lz = -0.5, -0.82, 0.72               # light direction
+    # ---- Carapace: five-step lit dome (highlight -> core shadow) ---------
+    lx, ly, lz = -0.48, -0.80, 0.75              # light from upper-left
     for y in range(_H):
         for x in range(_W):
             nx, ny = (x - cx) / rx, (y - cy) / ry
-            if nx * nx + ny * ny <= 1.0 and y <= cy + 3:
+            if nx * nx + ny * ny <= 1.0 and y <= cy + 4:
                 nz = math.sqrt(max(0.0, 1 - nx * nx - ny * ny))
                 l = nx * lx + ny * ly + nz * lz
-                g[y][x] = "g" if l > 0.6 else ("G" if l > 0.3 else "d")
+                g[y][x] = ("r" if l > 0.80 else "g" if l > 0.55
+                           else "G" if l > 0.30 else "d" if l > 0.08 else "D")
 
-    # ---- Scute plates: a grid of grooves carving the shell into tiles ----
-    # Vertical grooves (radiating) + horizontal growth rings give the giant
-    # tortoise's characteristic rectangular scutes.
-    for ang in (-62, -34, -10, 12, 36, 62):      # radial grooves
+    # ---- Scute plates: central vertebral column + costal rows ------------
+    shell = ("r", "g", "G", "d", "D")
+    for ang in (-52, -26, 0, 26, 52):            # radial grooves (vertebrae)
         a = math.radians(ang)
-        for r in range(2, 22):
-            x = int(round(cx + r * math.sin(a)))
-            y = int(round((cy - 1) - r * math.cos(a) * 0.7))
-            if 0 <= x < _W and 0 <= y < _H and g[y][x] in ("g", "G", "d"):
+        for rr in range(2, 22):
+            x = int(round(cx + rr * math.sin(a)))
+            y = int(round((cy - 1) - rr * math.cos(a) * 0.7))
+            if 0 <= x < _W and 0 <= y < _H and g[y][x] in shell:
                 g[y][x] = "s"
-    for rr in (6.0, 11.0):                        # concentric growth rings
+    for ring in (6.5, 12.0):                      # two concentric growth rings
         for x in range(_W):
             nx = (x - cx) / rx
             if abs(nx) < 1.0:
-                y = int(round((cy - 1) - rr * math.cos(math.asin(nx)) * 0.7))
-                if 0 <= y < _H and g[y][x] in ("g", "G", "d"):
+                y = int(round((cy - 1) - ring * math.cos(math.asin(nx)) * 0.7))
+                if 0 <= y < _H and g[y][x] in shell:
                     g[y][x] = "s"
-    # Raised scute centres: brighten cells ringed by grooves near the top.
-    src = [r[:] for r in g]
+
+    # ---- Bevel each scute: darken shell pixels touching a groove (AO) ----
+    darker = {"r": "g", "g": "G", "G": "d", "d": "D", "D": "D"}
+    src = [row[:] for row in g]
     for y in range(_H):
         for x in range(_W):
-            if src[y][x] == "g" and y < cy:
-                near_seam = any(
+            if src[y][x] in shell and any(
                     0 <= x + a < _W and 0 <= y + b < _H
-                    and src[y + b][x + a] == "s"
-                    for a, b in ((0, -1), (0, 1), (-1, 0), (1, 0)))
-                if not near_seam:
-                    g[y][x] = "r"
+                    and src[y + b][x + a] in ("s", "o")
+                    for a, b in ((0, -1), (0, 1), (-1, 0), (1, 0))):
+                g[y][x] = darker[src[y][x]]
 
-    # ---- Shell outline ---------------------------------------------------
-    src = [r[:] for r in g]
-    shell = ("g", "G", "d", "r", "s")
+    # ---- Shell outline + contact shadow onto body/legs -------------------
+    src = [row[:] for row in g]
     for y in range(_H):
         for x in range(_W):
             if src[y][x] in shell and any(
@@ -172,6 +193,11 @@ def _build(t: int) -> list[str]:
                     or src[y + b][x + a] == "."
                     for a, b in ((0, 1), (1, 0), (-1, 0), (0, -1))):
                 g[y][x] = "o"
+    # the shell's lower lip drops a shadow onto whatever sits just beneath it
+    for x in range(_W):
+        for y in range(_H - 1):
+            if g[y][x] == "o" and g[y + 1][x] in ("L", "l", "y", "n", "N"):
+                put(x, y + 1, "k")
 
     return ["".join(r) for r in g]
 
