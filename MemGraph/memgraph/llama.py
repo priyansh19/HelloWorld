@@ -117,10 +117,19 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._update_smoke(self._mood.stress)
         self.update()
 
+    def _sprite_units(self) -> tuple[int, int]:
+        """Sprite width/height in sizing units — a supplied picture may set its
+        own aspect ratio, so ask the art module when it can tell us."""
+        fn = getattr(self._art, "sprite_units", None)
+        if fn is not None:
+            return fn()
+        return self._art.SPRITE_W, self._art.SPRITE_H
+
     def _recompute_size(self) -> None:
         self._ox = 6.0
-        w = int(self._art.SPRITE_W * self._scale + 2 * self._ox)
-        h = int(self._art.SPRITE_H * self._scale) + self._pad_top
+        sw, sh = self._sprite_units()
+        w = int(sw * self._scale + 2 * self._ox)
+        h = int(sh * self._scale) + self._pad_top
         self.setFixedSize(w, h)
 
     def apply_config(self, cfg: Config) -> None:
@@ -266,8 +275,9 @@ class LlamaBuddy(QtWidgets.QWidget):
         # Vector characters (the Mustang) rasterise to a cached high-resolution
         # image rather than a grid of cells.
         if getattr(art, "IS_VECTOR", False):
-            w = art.SPRITE_W * s
-            h = art.SPRITE_H * s
+            sw, sh = self._sprite_units()
+            w = sw * s
+            h = sh * s
             img = art.render_image(int(round(w)), self._frame_i)
             p.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
             p.save()

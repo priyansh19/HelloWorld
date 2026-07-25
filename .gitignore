@@ -1,0 +1,3 @@
+
+# Baked sprite sources — the .glb is a build input, not shipped with the app
+MemGraph/memgraph/assets/*.keyed.png
