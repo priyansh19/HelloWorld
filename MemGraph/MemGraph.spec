@@ -22,6 +22,10 @@ binaries = []
 for dll in glob.glob("lhm/*.dll"):
     datas.append((dll, "lhm"))
 
+# The baked 3D car atlas — without it the buddy falls back to the vector car.
+for f in glob.glob("memgraph/assets/car3d/*"):
+    datas.append((f, "memgraph/assets/car3d"))
+
 # pythonnet / clr_loader must be fully collected for the frozen build.
 for pkg in ("pythonnet", "clr_loader"):
     try:
