@@ -59,16 +59,22 @@ REM Optional: in-process CPU/GPU temperatures (safe to fail).
 python -m pip install pythonnet >nul 2>&1
 
 echo.
+echo [3b/4] Using the classic card widget (no llama)...
+python -c "from memgraph.config import load_config, save_config; c=load_config(); c.mode='pinned'; save_config(c)" 2>nul
+
+echo.
 echo [4/4] Launching MemGraph...
 start "" pythonw -m memgraph
 
 echo.
 echo ==================================================
-echo   Done!  A pixel llama should be walking on your
-echo   taskbar. If not, right-click the tray "M" icon
-echo   -^> Mode -^> Llama.
+echo   Done!  The MemGraph card should appear on your
+echo   desktop. Right-click it -^> Settings to pick
+echo   metrics, or "Enable full temperatures (admin)"
+echo   for CPU/GPU temps.
 echo.
-echo   To start it again later, run:   pythonw -m memgraph
+echo   It will start automatically at every login.
+echo   To start it now, run:   pythonw -m memgraph
 echo ==================================================
 echo.
 pause
