@@ -1,14 +1,19 @@
-"""Pure logic for the taskbar buddy: a pixel tortoise with a real walk cycle.
+"""Pure logic for the taskbar buddy: a realistic Galapagos-tortoise pixel sprite.
 
 Qt-free so the buddy's personality is unit-testable. The tortoise is generated
-procedurally (smooth domed shell + scute pattern + head/eye/beak + four legs)
-into an 8-frame walk cycle where the legs lift, swing forward and plant — the
-widget just rasterises the character grids with QPainter (no image assets).
+procedurally into an 8-frame walk cycle modelled on a real Galapagos giant
+tortoise: a high, rounded olive/khaki-green carapace divided into rectangular
+scute plates (raised centres, dark grooves), a long grey scaly neck ending in a
+hooked beak, and four thick elephantine grey legs with stubby toes that lift,
+swing and plant. The widget rasterises the character grids with QPainter (no
+image assets).
 
 Palette legend:
-``G`` shell · ``g`` shell highlight · ``s`` shell pattern/outline · ``h`` near
-skin · ``f`` far-leg skin · ``k`` foot/beak · ``e`` eye-white · ``o`` pupil ·
-``S`` sunglasses · ``W`` lens glint · ``.`` transparent
+``g/G/d`` shell scute facets (lit/mid/shadow olive-green) · ``r`` raised scute
+highlight · ``s`` scute groove/seam · ``o`` shell outline · ``n/N`` neck/head
+skin (grey, lit/shadow) · ``b`` beak · ``L/l`` legs (grey, lit/shadow) · ``k``
+foot/toe shadow · ``y`` plastron (yellow-tan belly) · ``e`` eye-white · ``p``
+pupil · ``S`` sunglasses · ``W`` lens glint · ``.`` transparent
 """
 
 from __future__ import annotations
@@ -17,23 +22,31 @@ import math
 from dataclasses import dataclass
 
 PALETTE = {
-    "G": "#5f9e4f", "g": "#93d071", "s": "#375e2c",
-    "h": "#c7ab72", "f": "#6f5730", "k": "#8a6f3e",
-    "e": "#f4f0e6", "o": "#1c1f26", "S": "#14161c", "W": "#9fd8ff",
+    # Carapace: olive / khaki green, faceted by the dome's curvature.
+    "g": "#8f9a54", "G": "#6f7a3e", "d": "#515a2b", "r": "#a7b167",
+    "s": "#39401f", "o": "#2a2f16",
+    # Neck & head: grey, scaly reptilian skin.
+    "n": "#9a9c96", "N": "#6f716c", "b": "#4a4b46",
+    # Legs: grey, a touch darker/warmer than the neck; toes in deep shadow.
+    "L": "#8b8d86", "l": "#63655f", "k": "#3b3c37",
+    # Plastron (belly) peeking below the shell.
+    "y": "#c7b56e",
+    # Face + accessories.
+    "e": "#f2eee2", "p": "#141418", "S": "#14161c", "W": "#9fd8ff",
 }
 
 PANIC_TINT = "#ff5470"
-TINT_EXEMPT = set("SoWke")   # eye/beak/shades keep colour under the panic tint
+TINT_EXEMPT = set("epSW")   # eyes/shades keep colour under the RAM-red tint
 
-_W, _H = 58, 36
+_W, _H = 60, 38
 _FRAMES = 8
 
 
 def _leg_phase(p: float) -> tuple[float, float]:
-    """(lift 0..1, dx) for a leg at cycle phase ``p`` in [0,1).
+    """Return (lift, dx) for a leg at walk-cycle phase ``p`` in [0, 1).
 
-    Stance (foot planted) slides the foot backward; swing lifts it and carries
-    it forward — a natural walking gait.
+    Stance (p < 0.62): foot planted, sliding backward under the body.
+    Swing  (p >= 0.62): foot lifts on a sine arc and reaches forward.
     """
     if p < 0.62:
         return 0.0, 2.4 * (1 - 2 * (p / 0.62))
@@ -44,89 +57,124 @@ def _leg_phase(p: float) -> tuple[float, float]:
 def _build(t: int) -> list[str]:
     g = [["."] * _W for _ in range(_H)]
 
-    def put(x, y, ch):
+    def put(x, y, c):
         if 0 <= x < _W and 0 <= y < _H:
-            g[y][x] = ch
+            g[y][x] = c
 
-    cx, cy, rx, ry = 25.0, 20.0, 20.0, 15.0
+    # Carapace geometry: a tall rounded dome sitting high on the legs.
+    cx, cy, rx, ry = 25.0, 17.0, 20.0, 13.5
 
-    # Legs first, so the shell draws over their tops (a lifted leg tucks under).
-    # (base x, phase offset, near/far) — diagonal gait via the 0.0/0.5 offsets.
-    for x0, off, near in ((10, 0.0, False), (20, 0.5, True),
-                          (34, 0.5, True), (45, 0.0, False)):
+    # ---- Legs: four thick elephantine columns with stubby toes -----------
+    # (x0, near?) — near legs (front-right, back-right to viewer) are lighter.
+    for x0, off, near in ((9, 0.0, False), (18, 0.5, True),
+                          (31, 0.5, True), (40, 0.0, False)):
         lift, dx = _leg_phase((t / _FRAMES + off) % 1.0)
         x = x0 + int(round(dx))
-        bottom = 32 - int(round(lift * 6))
-        skin = "h" if near else "f"
-        foot = "k" if near else "f"
-        for yy in range(20, bottom):
-            for xx in range(x, x + 5):
-                put(xx, yy, skin)
-        for xx in range(x, x + 5):
-            put(xx, bottom, foot)
-        for tx in (x, x + 2, x + 4):
-            put(tx, bottom + 1, foot)
+        bottom = 34 - int(round(lift * 5))
+        body, shad = ("L", "l") if near else ("l", "k")
+        for yy in range(24, bottom):
+            for xx in range(x, x + 7):
+                # round the outer edge of the column slightly
+                edge = xx == x or xx == x + 6
+                put(xx, yy, shad if edge else body)
+        # foot + three stubby toes
+        for xx in range(x, x + 7):
+            put(xx, bottom, "k")
+        for tx in (x + 1, x + 3, x + 5):
+            put(tx, bottom + 1, "k")
 
-    for y in range(_H):                      # shell dome
-        for x in range(_W):
-            if ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1.0 and y <= cy + 3:
-                g[y][x] = "G"
+    # ---- Plastron: a sliver of yellow-tan belly below the shell ----------
+    for y in range(24, 28):
+        for x in range(18, 34):
+            if ((x - 26) / 9) ** 2 + ((y - 25) / 3) ** 2 <= 1.0:
+                put(x, y, "y")
 
-    for y in range(18, 25):                  # neck
-        for x in range(38, 47):
-            if g[y][x] == ".":
-                put(x, y, "h")
-    hx, hy, hrx, hry = 49.0, 20.0, 7.5, 6.5  # head
+    # ---- Neck + head: long grey scaly neck, hooked beak ------------------
+    for y in range(15, 24):                      # neck, thickening downward
+        for x in range(38, 48):
+            t2 = (x - 38) / 10.0
+            half = 2.5 + 2.5 * t2
+            if abs(y - (19 + 1.5 * t2)) <= half:
+                if g[y][x] == ".":
+                    put(x, y, "n")
+    hx, hy, hrx, hry = 50.0, 17.0, 7.0, 5.5      # head
     for y in range(_H):
         for x in range(_W):
             if ((x - hx) / hrx) ** 2 + ((y - hy) / hry) ** 2 <= 1.0:
-                put(x, y, "h")
-    put(51, 17, "e")
-    put(52, 17, "o")
-    put(55, 21, "k")                         # beak
-
-    for i, y in enumerate(range(19, 24)):    # tail
-        for x in range(3, 3 + (5 - i)):
-            if g[y][x] == ".":
-                put(x, y, "h")
-
-    src = [r[:] for r in g]                  # shell outline
+                put(x, y, "n")
+    # shade the underside of neck/head for volume
     for y in range(_H):
         for x in range(_W):
-            if src[y][x] == "G" and any(
+            if g[y][x] == "n" and (y >= 20 or (y > hy and (x - hx) ** 2
+                                    + ((y - hy) * 1.3) ** 2 > 20)):
+                g[y][x] = "N"
+    # hooked beak jutting forward, mouth line
+    put(57, 16, "b"); put(58, 17, "b"); put(57, 18, "b")
+    put(56, 18, "b"); put(55, 19, "N")
+    # eye
+    put(53, 15, "e"); put(54, 15, "p")
+
+    # ---- Short tail on the left -----------------------------------------
+    for i, y in enumerate(range(19, 22)):
+        for x in range(4, 4 + (4 - i)):
+            if g[y][x] == ".":
+                put(x, y, "N")
+
+    # ---- Carapace: faceted olive dome ------------------------------------
+    lx, ly, lz = -0.5, -0.82, 0.72               # light direction
+    for y in range(_H):
+        for x in range(_W):
+            nx, ny = (x - cx) / rx, (y - cy) / ry
+            if nx * nx + ny * ny <= 1.0 and y <= cy + 3:
+                nz = math.sqrt(max(0.0, 1 - nx * nx - ny * ny))
+                l = nx * lx + ny * ly + nz * lz
+                g[y][x] = "g" if l > 0.6 else ("G" if l > 0.3 else "d")
+
+    # ---- Scute plates: a grid of grooves carving the shell into tiles ----
+    # Vertical grooves (radiating) + horizontal growth rings give the giant
+    # tortoise's characteristic rectangular scutes.
+    for ang in (-62, -34, -10, 12, 36, 62):      # radial grooves
+        a = math.radians(ang)
+        for r in range(2, 22):
+            x = int(round(cx + r * math.sin(a)))
+            y = int(round((cy - 1) - r * math.cos(a) * 0.7))
+            if 0 <= x < _W and 0 <= y < _H and g[y][x] in ("g", "G", "d"):
+                g[y][x] = "s"
+    for rr in (6.0, 11.0):                        # concentric growth rings
+        for x in range(_W):
+            nx = (x - cx) / rx
+            if abs(nx) < 1.0:
+                y = int(round((cy - 1) - rr * math.cos(math.asin(nx)) * 0.7))
+                if 0 <= y < _H and g[y][x] in ("g", "G", "d"):
+                    g[y][x] = "s"
+    # Raised scute centres: brighten cells ringed by grooves near the top.
+    src = [r[:] for r in g]
+    for y in range(_H):
+        for x in range(_W):
+            if src[y][x] == "g" and y < cy:
+                near_seam = any(
+                    0 <= x + a < _W and 0 <= y + b < _H
+                    and src[y + b][x + a] == "s"
+                    for a, b in ((0, -1), (0, 1), (-1, 0), (1, 0)))
+                if not near_seam:
+                    g[y][x] = "r"
+
+    # ---- Shell outline ---------------------------------------------------
+    src = [r[:] for r in g]
+    shell = ("g", "G", "d", "r", "s")
+    for y in range(_H):
+        for x in range(_W):
+            if src[y][x] in shell and any(
                     not (0 <= x + a < _W and 0 <= y + b < _H)
                     or src[y + b][x + a] == "."
-                    for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1))):
-                g[y][x] = "s"
-
-    for y in range(_H):                      # central scute plate
-        for x in range(_W):
-            if g[y][x] == "G":
-                d = ((x - cx) / 6.5) ** 2 + ((y - (cy - 4)) / 4.0) ** 2
-                if 0.8 <= d <= 1.2:
-                    g[y][x] = "s"
-    for ang in (-58, -30, 0, 30, 58):        # scute dividers
-        a = math.radians(ang)
-        for r in range(6, 21):
-            x = int(round(cx + r * math.sin(a)))
-            y = int(round((cy - 2) - r * math.cos(a) * 0.74))
-            if 0 <= x < _W and 0 <= y < _H and g[y][x] == "G":
-                g[y][x] = "s"
-
-    for x in range(_W):                      # top highlight (dome volume)
-        col = [y for y in range(_H) if g[y][x] in ("G", "s")]
-        if col:
-            top = min(col)
-            if g[top][x] == "G":
-                g[top][x] = "g"
-            if top + 1 < _H and g[top + 1][x] == "G":
-                g[top + 1][x] = "g"
+                    for a, b in ((0, 1), (1, 0), (-1, 0), (0, -1))):
+                g[y][x] = "o"
 
     return ["".join(r) for r in g]
 
 
 WALK_FRAMES = [_build(t) for t in range(_FRAMES)]
-GALLOP_FRAMES = WALK_FRAMES            # tortoises don't gallop; just steps faster
+GALLOP_FRAMES = WALK_FRAMES
 SPRITE_H = len(WALK_FRAMES[0])
 SPRITE_W = len(WALK_FRAMES[0][0])
 
@@ -137,7 +185,7 @@ def frames_for_gait(gait: str) -> list[list[str]]:
 
 def _find_eye(rows: list[str]) -> tuple[int, int] | None:
     for r, row in enumerate(rows):
-        c = row.find("o")
+        c = row.find("p")
         if c != -1:
             return r, c
     return None
@@ -156,7 +204,7 @@ def apply_overlays(rows: list[str], shades: bool = False,
         lo = max(0, c - 2)
         rows[r] = row[:lo] + seg[:len(row) - lo] + row[lo + len(seg):]
     elif blink and c > 0:
-        rows[r] = rows[r][:c] + "e" + rows[r][c + 1:]
+        rows[r] = rows[r][:c] + "N" + rows[r][c + 1:]
     return rows
 
 
@@ -176,17 +224,14 @@ class Mood:
 
 def mood_for(cpu_pct: float, ram_pct: float, amber: float, red: float,
              model_loaded: bool) -> Mood:
-    """Map live metrics to behaviour.
-
-    RAM drives the alarm: once memory passes the amber threshold the buddy turns
-    progressively **red** and starts **running** (gallop), reaching full red at
-    the red threshold. Below amber, CPU sets a calm idle/walk/gallop gait. A
-    running tracked process puts sunglasses on.
-    """
+    """RAM drives the alarm: once memory passes amber the tortoise turns
+    progressively red and runs (gallop), full red at the red threshold. Below
+    amber, CPU sets a calm idle/walk/gallop gait. A running tracked process puts
+    sunglasses on."""
     stress = 0.0
     if ram_pct >= amber:
         frac = min(1.0, (ram_pct - amber) / max(1.0, red - amber))
-        stress = 0.25 + 0.75 * frac        # clearly red even just over amber
+        stress = 0.25 + 0.75 * frac
         gait = "gallop"
     elif cpu_pct < 12:
         gait = "idle"
@@ -202,7 +247,6 @@ def mood_for(cpu_pct: float, ram_pct: float, amber: float, red: float,
     elif gait == "walk":
         frame_ms = int(150 - 1.0 * cpu_pct)
     else:
-        # Faster legs the more stressed / loaded it is.
         frame_ms = int(110 - 0.5 * cpu_pct - 35 * stress)
     return Mood(gait=gait, pack=pack, shades=model_loaded,
                 panic=panic, frame_ms=max(45, frame_ms), stress=stress)

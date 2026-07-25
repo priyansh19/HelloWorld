@@ -237,7 +237,7 @@ class LlamaBuddy(QtWidgets.QWidget):
 
         if m.panic:
             p.setRenderHint(QtGui.QPainter.Antialiasing)
-            head_col = 48  # tortoise head sits near the right edge of the sprite
+            head_col = 50  # tortoise head sits near the right edge of the sprite
             head_x = ox + (head_col * s if self._facing == 1
                            else (SPRITE_W - head_col) * s)
             p.setPen(QtGui.QColor(PANIC_TINT))
