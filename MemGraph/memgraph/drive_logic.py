@@ -24,14 +24,20 @@ import math
 from dataclasses import dataclass, field
 
 TURN_RATE = 460.0        # deg/s the yaw sweeps during a turn-around
+DONUT_RATE = 560.0       # deg/s during a donut — a drift spin is quicker
 PARK_HYSTERESIS = 2.0    # RAM % band around park_below
 ARRIVE_PX = 3.0          # close enough to the parking spot to stop
 
-# Speed multiplier vs RAM once driving: eases in just past the park line and
-# roughly doubles by the time memory is critical.
-def _ram_speed_mult(ram_pct: float, park_below: float) -> float:
-    over = max(0.0, ram_pct - park_below)
-    return 1.0 + min(1.6, over * 0.032)          # +0.032x per % over the line
+
+def _ram_speed_mult(ram_pct: float, park_below: float,
+                    donut_above: float) -> float:
+    """Speed multiplier vs RAM: eases from 1x just past the park line up to
+    ~1.5x approaching the donut threshold, then snaps to ~2x ("almost twice
+    normal") once the machine is really burning."""
+    if ram_pct >= donut_above:
+        return 2.0 + 0.3 * min(1.0, (ram_pct - donut_above) / 20.0)
+    span = max(1.0, donut_above - park_below)
+    return 1.0 + 0.5 * max(0.0, ram_pct - park_below) / span
 
 
 @dataclass
@@ -45,14 +51,17 @@ class DriveState:
     speed: float = 0.0        # current speed, px/s (for the smoke/tests)
     park_side: int = 0        # -1 left corner, +1 right corner, 0 undecided
     _turn_target: float = field(default=0.0, repr=False)
+    _sweep_left: float = field(default=0.0, repr=False)   # degrees still to turn
+    _turn_rate: float = field(default=TURN_RATE, repr=False)
 
 
 class Driver:
     """Advances a :class:`DriveState` through park/drift/turn behaviour."""
 
-    def __init__(self, park_below: float = 50.0,
+    def __init__(self, park_below: float = 50.0, donut_above: float = 80.0,
                  wheel_circumference_px: float = 46.0) -> None:
         self.park_below = float(park_below)
+        self.donut_above = float(donut_above)
         self.wheel_circ = max(8.0, wheel_circumference_px)
 
     # -------------------------------------------------------------- #
@@ -75,11 +84,13 @@ class Driver:
                 st.parked = True
                 st.park_side = -1 if st.x < (left + right) / 2 else 1
 
-        # ---- turning: sweep yaw through the ring, wheels still spinning
+        # ---- turning: sweep yaw through the ring, wheels still spinning.
+        # A donut is the same sweep plus a full extra 360 revolution.
         if st.turning:
-            st.yaw = (st.yaw + TURN_RATE * dt) % 360.0
-            remaining = (st._turn_target - st.yaw) % 360.0
-            if remaining <= TURN_RATE * dt * 1.5:
+            d = st._turn_rate * dt
+            st.yaw = (st.yaw + d) % 360.0
+            st._sweep_left -= d
+            if st._sweep_left <= 0.0:
                 st.yaw = st._turn_target
                 st.turning = False
             # burnout: wheels churn through the slide at the pre-turn rate
@@ -105,25 +116,37 @@ class Driver:
             return st
 
         # ---- drifting back and forth ---------------------------------
-        st.speed = cruise_px_s * _ram_speed_mult(ram_pct, self.park_below)
+        st.speed = cruise_px_s * _ram_speed_mult(ram_pct, self.park_below,
+                                                 self.donut_above)
         st.x += st.facing * st.speed * dt
         st.spin += st.speed * dt / self.wheel_circ
+        donut = ram_pct >= self.donut_above
         if st.x <= left:
             st.x = left
             st.facing = 1
-            self._begin_turn_if_needed(st)
+            self._begin_turn_if_needed(st, donut=donut)
         elif st.x >= right:
             st.x = right
             st.facing = -1
-            self._begin_turn_if_needed(st)
+            self._begin_turn_if_needed(st, donut=donut)
         return st
 
     # -------------------------------------------------------------- #
-    def _begin_turn_if_needed(self, st: DriveState) -> None:
+    def _begin_turn_if_needed(self, st: DriveState, donut: bool = False) -> None:
+        """Start a yaw sweep toward the new heading.
+
+        Normally the shortest CCW sweep to face the other way; past the donut
+        threshold the car throws in a full extra circle — one donut at each
+        end of the screen — at the faster drift rate.
+        """
         target = 0.0 if st.facing == 1 else 180.0
-        if not math.isclose((st.yaw - target) % 360.0, 0.0, abs_tol=1.0):
-            st._turn_target = target
-            st.turning = True
+        base = (target - st.yaw) % 360.0
+        if base < 1.0 and not donut:
+            return
+        st._turn_target = target
+        st._sweep_left = base + (360.0 if donut else 0.0)
+        st._turn_rate = DONUT_RATE if donut else TURN_RATE
+        st.turning = True
 
     # -------------------------------------------------------------- #
     @staticmethod

@@ -211,10 +211,17 @@ class LlamaBuddy(QtWidgets.QWidget):
             self._smoke.hide()
 
     def _update_smoke(self, stress: float) -> None:
-        """Puff grey smoke from the exhaust in proportion to RAM stress."""
+        """Puff grey smoke from the exhaust in proportion to RAM stress.
+
+        While the 3D car is driving there is always at least a light exhaust
+        stream, so the tailpipe visibly breathes even before memory runs hot;
+        RAM stress then thickens it into the burnout cloud.
+        """
         if self.cfg.buddy_character != "car" or not self.cfg.car_smoke:
             self._stop_smoke()
             return
+        if self._art is car3d and not self._drive.parked:
+            stress = max(stress, 0.16)
         if stress <= 0.0 and self._smoke is None:
             return
         if self._smoke is None:
@@ -224,6 +231,7 @@ class LlamaBuddy(QtWidgets.QWidget):
         sm.cover_screen(self.screen().geometry() if self.screen()
                         else self._screen_geo())
         sm.set_intensity(stress)
+        sm.set_direction(self._facing)
         # Track the exhaust tip as the car drifts (mirrored when facing left).
         ex, ey = self._art.EXHAUST
         col = ex if self._facing == 1 else (self._art.SPRITE_W - 1 - ex)

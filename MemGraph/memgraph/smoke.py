@@ -63,6 +63,7 @@ class SmokeOverlay(QtWidgets.QWidget):
         self._spawn_acc = 0.0
         self._screen_geo = QtCore.QRect()
         self._rise_px = 192.0
+        self._dir = -1.0          # which way the exhaust stream blows (x sign)
 
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self._step)
@@ -92,6 +93,10 @@ class SmokeOverlay(QtWidgets.QWidget):
     def set_intensity(self, stress: float) -> None:
         self._intensity = max(0.0, min(1.0, stress))
 
+    def set_direction(self, facing: int) -> None:
+        """Car's travel direction; the stream blows out the back, opposite."""
+        self._dir = -1.0 if facing >= 0 else 1.0
+
     def run(self, on: bool) -> None:
         if on and not self._timer.isActive():
             self._timer.start(_FPS_MS)
@@ -120,9 +125,10 @@ class SmokeOverlay(QtWidgets.QWidget):
             # gone: lived out, or evaporated past the two-inch ceiling
             if p.age >= p.life or p.y + p.r < ceiling:
                 continue
-            # buoyant rise, swelling, lazy turbulence; sideways fanning grows
-            # with stress so a pegged machine gets a wide, LOW burnout cloud.
-            p.vy -= 10.0 * dt
+            # gentle buoyancy (stronger when stressed), swelling, turbulence;
+            # sideways fanning grows with stress so a pegged machine gets a
+            # wide, LOW burnout cloud hugging the taskbar.
+            p.vy -= (3.0 + 11.0 * s) * dt
             p.vx += random.uniform(-9.0, 9.0) * dt * (0.4 + 5.0 * s)
             p.vx *= (1.0 + 0.9 * s * dt)
             p.x += p.vx * dt
@@ -133,21 +139,22 @@ class SmokeOverlay(QtWidgets.QWidget):
         self.update()
 
     def _spawn(self, emit: float) -> None:
-        # Wider initial fan-out and faster rise as stress climbs, so at ~100%
-        # the plume spreads across the screen instead of a thin ribbon.
-        spread = 10.0 + 190.0 * emit
-        rise = 70.0 + 130.0 * emit
+        # An exhaust stream, not a chimney: puffs leave the tailpipe mostly
+        # HORIZONTALLY out the back of the car at tyre level, drifting only
+        # gently upward. Stress adds throughput, sideways churn and lift, so a
+        # burning machine reads as a burnout cloud boiling off the tyres.
+        back = self._dir * random.uniform(30.0, 62.0) * (1.0 + 1.4 * emit)
         self._puffs.append(_Puff(
-            x=self._src.x() + random.uniform(-4, 4),
+            x=self._src.x() + self._dir * random.uniform(0, 6),
             y=self._src.y() + random.uniform(-2, 2),
-            vx=random.uniform(-spread, spread),
-            vy=-rise * random.uniform(0.8, 1.2),
-            r=random.uniform(8, 15),
-            grow=random.uniform(20, 40) * (1.0 + emit),
+            vx=back + random.uniform(-10, 10) * emit,
+            vy=-random.uniform(3.0, 12.0) - 34.0 * emit,
+            r=random.uniform(5, 9) + 6.0 * emit,
+            grow=random.uniform(10, 22) * (1.0 + 1.2 * emit),
             age=0.0,
             # short lives keep the cloud churning — fresh puffs appear and old
             # ones clear quickly, so intensity changes read almost immediately
-            life=random.uniform(1.8, 3.4),
+            life=random.uniform(1.6, 3.0),
         ))
 
     # ------------------------------------------------------------------ #

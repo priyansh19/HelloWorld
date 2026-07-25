@@ -64,11 +64,36 @@ def test_turn_sweeps_yaw_through_the_ring():
     st = DriveState(x=RIGHT - 1, yaw=0.0, facing=1)
     seen = set()
     for _ in range(int(3 / DT)):
-        d.step(st, DT, 80, LEFT, RIGHT, CRUISE)
+        d.step(st, DT, 70, LEFT, RIGHT, CRUISE)
         seen.add(round(st.yaw / 15))         # bucketised headings
     assert st.facing == -1
     assert st.yaw == 180.0                   # ends facing left
     assert len(seen) > 4                     # passed through mid angles
+
+
+def test_donut_spins_a_full_extra_circle_above_80():
+    d = Driver(park_below=50, donut_above=80)
+    normal = DriveState(x=RIGHT - 1, yaw=0.0, facing=1)
+    donut = DriveState(x=RIGHT - 1, yaw=0.0, facing=1)
+    total_n = total_d = 0.0
+    for _ in range(int(4 / DT)):
+        py_n, py_d = normal.yaw, donut.yaw
+        d.step(normal, DT, 70, LEFT, RIGHT, CRUISE)
+        d.step(donut, DT, 92, LEFT, RIGHT, CRUISE)
+        total_n += (normal.yaw - py_n) % 360.0
+        total_d += (donut.yaw - py_d) % 360.0
+    assert donut.yaw == 180.0                # still ends facing the other way
+    assert total_d >= total_n + 300.0        # ...after ~a full extra circle
+
+
+def test_speed_doubles_at_the_donut_threshold():
+    d = Driver(park_below=50, donut_above=80)
+    calm = DriveState(x=500.0)
+    hot = DriveState(x=500.0)
+    d.step(calm, DT, 55, LEFT, RIGHT, CRUISE)
+    d.step(hot, DT, 85, LEFT, RIGHT, CRUISE)
+    assert hot.speed >= 2.0 * CRUISE         # "almost twice normal"
+    assert calm.speed < 1.2 * CRUISE
 
 
 def test_turning_keeps_wheels_churning():
