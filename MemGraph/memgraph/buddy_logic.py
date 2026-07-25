@@ -36,7 +36,10 @@ PALETTE = {
 }
 
 PANIC_TINT = "#ff5470"
-TINT_EXEMPT = set("epSW")   # eyes/shades keep colour under the RAM-red tint
+# Under the RAM alarm only the soft body flushes red — the head/face, tail and
+# legs. The shell keeps its olive colour, and eyes/shades stay as-is. So every
+# shell glyph (g/G/d/r/s/o) plus the eye/shade glyphs are exempt from the tint.
+TINT_EXEMPT = set("epSW") | set("gGdrso")
 
 _W, _H = 60, 38
 _FRAMES = 8
