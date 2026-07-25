@@ -29,9 +29,13 @@ function MaxC($path) {
     if ($s) { return ($s | Measure-Object -Property CookedValue -Maximum).Maximum }
     return $null
 }
+$ded = MaxC '\GPU Adapter Memory(*)\Dedicated Usage'
+$shr = MaxC '\GPU Adapter Memory(*)\Shared Usage'
+# Dedicated for discrete GPUs; shared for integrated GPUs (Intel/AMD iGPU).
+$vram = if ($ded -ne $null -and $ded -gt 0) { $ded } else { $shr }
 $o = [pscustomobject]@{
     gpu  = MaxC '\GPU Engine(*)\Utilization Percentage'
-    vram = MaxC '\GPU Adapter Memory(*)\Dedicated Usage'
+    vram = $vram
     npu  = MaxC '\NPU Engine(*)\Utilization Percentage'
 }
 $o | ConvertTo-Json -Compress

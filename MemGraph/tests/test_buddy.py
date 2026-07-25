@@ -25,26 +25,22 @@ def test_all_base_frames_valid():
 
 def test_overlays_keep_frame_valid():
     for frame in WALK_FRAMES:
-        for pack in ("normal", "full"):
-            for shades in (False, True):
-                for blink in (False, True):
-                    _assert_frame_valid(apply_overlays(
-                        frame, pack=pack, shades=shades, blink=blink))
+        for shades in (False, True):
+            for blink in (False, True):
+                _assert_frame_valid(apply_overlays(
+                    frame, shades=shades, blink=blink))
 
 
 def test_overlays_do_not_mutate_original():
     frame = WALK_FRAMES[0]
     before = list(frame)
-    apply_overlays(frame, pack="full", shades=True)
+    apply_overlays(frame, shades=True)
     assert frame == before
 
 
-def test_shades_and_pack_pixels_present():
-    rows = apply_overlays(WALK_FRAMES[0], pack="full", shades=True)
-    joined = "\n".join(rows)
-    assert "S" in joined          # sunglasses
-    assert "P" in joined          # pack
-    assert "p" in joined          # full-pack highlight
+def test_shades_pixels_present():
+    rows = apply_overlays(WALK_FRAMES[0], shades=True)
+    assert "S" in "\n".join(rows)          # sunglasses drawn over the eye
 
 
 def test_frames_for_gait():

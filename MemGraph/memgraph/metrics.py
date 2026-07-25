@@ -285,7 +285,13 @@ class MetricsSampler:
             used = self._gpu_mem_counter().value()
         if used is not None:
             total = self._gpu_total_vram()
-            return Metric("vram", "VRAM", "bytes", used, total, detail="dedicated")
+            detail = "dedicated"
+            if total <= 0 and self._psutil:
+                # Integrated GPU: memory is shared; Windows caps "shared GPU
+                # memory" at about half of system RAM.
+                total = int(self._psutil.virtual_memory().total * 0.5)
+                detail = "shared"
+            return Metric("vram", "VRAM", "bytes", used, total, detail=detail)
         return Metric("vram", "VRAM", "bytes", available=False,
                       detail="no GPU counter")
 

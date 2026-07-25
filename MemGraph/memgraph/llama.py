@@ -68,6 +68,8 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._drag_x: Optional[int] = None
         self._press_pos: Optional[QtCore.QPoint] = None
         self._tooltip = ""
+        self._ram_pct = 0.0
+        self._fs_hidden = False       # auto-hidden by a fullscreen app
 
         self._anim = QtCore.QTimer(self)
         self._anim.timeout.connect(self._on_anim)
@@ -95,6 +97,8 @@ class LlamaBuddy(QtWidgets.QWidget):
         proc = self.sampler.process(self.cfg.process_name)
         cpu_pct = cpu.pct if cpu.available else 0.0
         ram_pct = ram.pct if ram.available else 0.0
+        self._ram_pct = ram_pct
+        self._update_fullscreen_visibility()
 
         self._mood = mood_for(cpu_pct, ram_pct, self.cfg.threshold_amber,
                               self.cfg.threshold_red, proc.available)
@@ -133,12 +137,36 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._blink = (random.random() < 0.12)
         self.update()
 
+    def _update_fullscreen_visibility(self) -> None:
+        """Hide while a fullscreen app (video/game) is in front; restore after.
+
+        Skipped if the user manually hid the buddy from the tray.
+        """
+        from ._fullscreen import fullscreen_app_active
+        fs = fullscreen_app_active()
+        if fs and not self._fs_hidden and self.isVisible():
+            self._fs_hidden = True
+            self.hide()
+        elif not fs and self._fs_hidden:
+            self._fs_hidden = False
+            self.show()
+
+    @staticmethod
+    def _ram_speed_mult(ram_pct: float) -> float:
+        """Above 70% RAM, speed rises 20% for each further 10% band.
+
+        70-80% -> 1.2x, 80-90% -> 1.4x, 90-100% -> 1.6x, 100% -> 1.8x.
+        """
+        if ram_pct < 70:
+            return 1.0
+        bands = int((ram_pct - 70) // 10) + 1
+        return min(2.0, 1.0 + 0.2 * bands)
+
     def _move_step(self) -> None:
         """Walk steadily across the screen, turning around at each edge.
 
-        One full crossing takes ``llama_cross_seconds`` (default ~10 min) at a
-        walk; the gait multiplier makes it cross faster under CPU load. The
-        sprite mirrors to face its direction of travel.
+        One full crossing takes ``llama_cross_seconds`` (~5 min) at a walk; gait
+        (CPU) and high RAM speed it up. The sprite mirrors to face its travel.
         """
         if not self.isVisible() or self._drag_x is not None \
                 or not self.cfg.llama_wander:
@@ -149,7 +177,8 @@ class LlamaBuddy(QtWidgets.QWidget):
         if right <= left:
             return
         px_per_sec = geo.width() / max(20, self.cfg.llama_cross_seconds)
-        mult = _GAIT_SPEED.get(self._mood.gait, 1.0)
+        mult = (_GAIT_SPEED.get(self._mood.gait, 1.0)
+                * self._ram_speed_mult(self._ram_pct))
         self._pos_x += self._facing * px_per_sec * mult * (_MOVE_MS / 1000.0)
         if self._pos_x <= left:
             self._pos_x, self._facing = float(left), 1
@@ -183,7 +212,7 @@ class LlamaBuddy(QtWidgets.QWidget):
         m = self._mood
         frames = frames_for_gait(m.gait)
         rows = frames[self._frame_i % len(frames)]
-        rows = apply_overlays(rows, pack=m.pack, shades=m.shades,
+        rows = apply_overlays(rows, shades=m.shades,
                               blink=self._blink and not m.shades)
 
         p = QtGui.QPainter(self)

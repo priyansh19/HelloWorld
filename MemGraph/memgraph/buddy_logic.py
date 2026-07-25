@@ -1,81 +1,77 @@
-"""Pure logic for the taskbar llama buddy: sprites, overlays and moods.
+"""Pure logic for the taskbar buddy: a pixel cat, its animation and moods.
 
-Qt-free on purpose so the whole personality of the llama is unit-testable.
-The sprite art is a character grid per frame; the widget rasterises it with
-QPainter at runtime (no image assets).
+Qt-free on purpose so the buddy's whole personality is unit-testable. The art is
+a character grid per frame; the widget rasterises it with QPainter at runtime
+(no image assets).
 
 Palette legend:
-``E`` ear · ``H`` head · ``o`` eye · ``M`` muzzle · ``N`` neck · ``B`` body ·
-``b`` belly shade · ``T`` tail · ``L``/``l`` legs · ``P``/``p`` saddle-pack ·
-``S`` sunglasses · ``W`` lens glint · ``.`` transparent
+``C`` body · ``c`` belly/leg shade · ``H`` head · ``E`` ear · ``i`` inner ear ·
+``o`` eye · ``n`` nose · ``T`` tail · ``L`` leg · ``p`` paw · ``S`` sunglasses ·
+``W`` lens glint · ``.`` transparent
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-SPRITE_W = 24
-
 PALETTE = {
-    "E": "#e8d5b0", "H": "#f2e3c8", "N": "#f2e3c8", "B": "#f2e3c8",
-    "b": "#d9c19a", "T": "#d9c19a", "L": "#d9c19a", "l": "#c4a87e",
-    "M": "#c9a06e", "o": "#2a2118",
-    "P": "#e0684b", "p": "#f28a6a", "S": "#14161c", "W": "#9fd8ff",
+    "C": "#e8b06a", "c": "#cf8f45", "H": "#eab873", "E": "#e8b06a",
+    "i": "#e8968a", "o": "#2a2118", "n": "#c9705f", "T": "#e8b06a",
+    "L": "#cf8f45", "p": "#b87a38", "S": "#14161c", "W": "#9fd8ff",
+    # kept so old references don't break:
+    "N": "#eab873", "M": "#c9705f", "b": "#cf8f45",
 }
 
 PANIC_TINT = "#ff5470"
-# Pixels that keep their own colour when the panic tint is applied.
-TINT_EXEMPT = set("SoW")
+TINT_EXEMPT = set("SoWn")  # eyes/shades/nose keep their colour under panic tint
 
+# Cat body (facing right): upright ears + raised round head, oval body, tail.
 _BODY = [
-    "........................",
-    ".................E.E....",
-    ".................EEE....",
-    "................EHHHH...",
-    "................HHHHo...",
-    "................HHHM....",
-    ".................NNN....",
-    ".TT..............NNN....",
-    ".TTBBBBBBBBBBBBBBNNN....",
-    "..BBBBBBBBBBBBBBBNN.....",
-    "..BBBBBBBBBBBBBBBB......",
-    "..bBBBBBBBBBBBBBb.......",
+    "..................E..E....",
+    ".................EiE.EiE..",
+    ".................HHHHHHH..",
+    "................HHHHHHHH..",
+    "T...............HHHHHHHHH.",
+    "TT..............HHHHHoHHH.",
+    "TT..............HHHHHHHnn.",
+    ".T...........CCCCCCHHHHHH.",
+    ".TCCCCCCCCCCCCCCCCCCCCCC..",
+    "..CCCCCCCCCCCCCCCCCCCCC...",
+    "..CCCCCCCCCCCCCCCCCCCC....",
+    "..cCCCCCCCCCCCCCCCCCCc....",
 ]
 
 _WALK_LEGS = [
-    [
-        "...LL...LL...LL..LL.....",
-        "...LL...LL...LL..LL.....",
-        "...ll...ll...ll..ll.....",
-    ],
-    [
-        "....LL...LL..LL...LL....",
-        "....LL...LL..LL...LL....",
-        "....ll...ll..ll...ll....",
-    ],
+    ["...LL..LL......LL..LL.....",
+     "...LL..LL......LL..LL.....",
+     "...pp..pp......pp..pp....."],
+    ["..LL...LL.....LL...LL.....",
+     "..LL...LL.....LL...LL.....",
+     "..pp...pp.....pp...pp....."],
 ]
 
 _GALLOP_LEGS = [
-    [  # extended
-        ".LL..........LLL........",
-        "LL............LLL.......",
-        "l..............ll.......",
-    ],
-    [  # gathered
-        "....LL....LL............",
-        ".....LL..LL.............",
-        ".....ll..ll.............",
-    ],
-    [  # mid-stride
-        "..LL......LL...LL.......",
-        "..LL......LL....LL......",
-        "..ll......ll....ll......",
-    ],
+    ["...L.....L.....L.....L....",
+     "..L......L....L......L....",
+     "..p......p....p......p...."],
+    ["....LLLL.........LLLL.....",
+     "....LLLL.........LLLL.....",
+     "....pppp.........pppp....."],
+    ["...LL..LL......LL..LL.....",
+     "..L.....L.....L.....L.....",
+     "..p.....p.....p.....p....."],
 ]
 
-WALK_FRAMES = [_BODY + legs for legs in _WALK_LEGS]
-GALLOP_FRAMES = [_BODY + legs for legs in _GALLOP_LEGS]
+
+def _pad(rows: list[str]) -> list[str]:
+    w = max(len(r) for r in rows)
+    return [r.ljust(w, ".") for r in rows]
+
+
+WALK_FRAMES = [_pad(_BODY + legs) for legs in _WALK_LEGS]
+GALLOP_FRAMES = [_pad(_BODY + legs) for legs in _GALLOP_LEGS]
 SPRITE_H = len(WALK_FRAMES[0])
+SPRITE_W = len(WALK_FRAMES[0][0])
 
 
 def frames_for_gait(gait: str) -> list[list[str]]:
@@ -83,46 +79,52 @@ def frames_for_gait(gait: str) -> list[list[str]]:
     return GALLOP_FRAMES if gait == "gallop" else WALK_FRAMES
 
 
-def apply_overlays(rows: list[str], pack: str = "normal",
-                   shades: bool = False, blink: bool = False) -> list[str]:
-    """Stamp the saddle-pack / sunglasses / blink onto a frame copy."""
+def _find_eye(rows: list[str]) -> tuple[int, int] | None:
+    for r, row in enumerate(rows):
+        c = row.find("o")
+        if c != -1:
+            return r, c
+    return None
+
+
+def apply_overlays(rows: list[str], shades: bool = False,
+                   blink: bool = False) -> list[str]:
+    """Stamp sunglasses / blink onto a copy of the frame."""
     rows = list(rows)
-    if pack == "full":
-        rows[5] = rows[5][:5] + "pppp" + rows[5][9:]
-        rows[6] = rows[6][:4] + "PPPPPPP" + rows[6][11:]
-        rows[7] = rows[7][:3] + "PPPPPPPP" + rows[7][11:]
-    else:
-        rows[6] = rows[6][:5] + "PPPP" + rows[6][9:]
-        rows[7] = rows[7][:4] + "PPPPPP" + rows[7][10:]
+    eye = _find_eye(rows)
+    if eye is None:
+        return rows
+    r, c = eye
     if shades:
-        rows[3] = rows[3][:15] + "SSSSSS" + rows[3][21:]
-        rows[4] = rows[4][:16] + "SWSSW" + rows[4][21:]
+        row = rows[r]
+        seg = "SS" + "S" + "W"           # lens + glint
+        lo = max(0, c - 2)
+        rows[r] = row[:lo] + seg[:len(row) - lo] + row[lo + len(seg):]
     elif blink:
-        rows[4] = rows[4][:20] + "H" + rows[4][21:]
+        rows[r] = rows[r][:c] + "H" + rows[r][c + 1:]
     return rows
 
 
 @dataclass(frozen=True)
 class Mood:
     gait: str            # "idle" | "walk" | "gallop"
-    pack: str            # "normal" | "full"
+    pack: str            # kept for compatibility (unused visually now)
     shades: bool         # tracked LLM process is running
-    panic: bool          # primary metric past the red threshold
+    panic: bool          # RAM past the red threshold
     frame_ms: int        # animation frame interval
 
     @property
     def wander_ok(self) -> bool:
-        """Only stroll around when relaxed."""
         return self.gait != "gallop" and not self.panic
 
 
 def mood_for(cpu_pct: float, ram_pct: float, amber: float, red: float,
              model_loaded: bool) -> Mood:
-    """Map live metrics to the llama's behaviour.
+    """Map live metrics to the cat's behaviour.
 
-    * CPU drives the gait: lazy stroll < 12%, walk < 50%, gallop above.
-    * RAM drives the saddle-pack (full past amber) and panic (past red).
-    * A running tracked process (your LLM) puts its shades on.
+    CPU drives the gait (stroll < 12% < walk < 50% < gallop); RAM past the red
+    threshold triggers panic; a running tracked process puts sunglasses on.
+    (Traversal *speed* is driven by RAM in the widget itself.)
     """
     panic = ram_pct >= red
     if panic:
@@ -135,12 +137,11 @@ def mood_for(cpu_pct: float, ram_pct: float, amber: float, red: float,
         gait = "gallop"
 
     pack = "full" if ram_pct >= amber else "normal"
-
     if gait == "idle":
         frame_ms = 340
     elif gait == "walk":
-        frame_ms = int(220 - 1.2 * cpu_pct)          # 220ms .. ~160ms
+        frame_ms = int(220 - 1.2 * cpu_pct)
     else:
-        frame_ms = max(60, int(130 - 0.7 * cpu_pct))  # faster with load
+        frame_ms = max(60, int(130 - 0.7 * cpu_pct))
     return Mood(gait=gait, pack=pack, shades=model_loaded,
                 panic=panic, frame_ms=frame_ms)
