@@ -27,8 +27,8 @@ from PySide6 import QtCore, QtGui
 # Sizing units the widget multiplies by cfg.llama_scale; the height follows the
 # atlas aspect at load time. 97 units puts the car around 390 px wide at the
 # default scale (a 2.2x bump from the first cut, per user request).
-SPRITE_W = 97
-SPRITE_H = 40          # provisional until an atlas is loaded
+SPRITE_W = 146
+SPRITE_H = 60          # provisional until an atlas is loaded
 
 FRAMES = 8             # legacy shim for frames_for_gait
 IS_VECTOR = True       # tells the widget to use the image paint path

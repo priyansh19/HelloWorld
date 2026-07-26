@@ -1,10 +1,13 @@
 """Tests for the car's park/drift/turn state machine (Qt-free)."""
 
-from memgraph.drive_logic import Driver, DriveState, PARK_HYSTERESIS
+import math
+
+from memgraph.drive_logic import Driver, DriveState, PARK_HYSTERESIS, PARK_YAW
 
 LEFT, RIGHT = 0.0, 1000.0
 CRUISE = 30.0
 DT = 0.03
+SPRITE_W = 40.0
 
 
 def run(driver, st, ram, seconds):
@@ -87,13 +90,62 @@ def test_donut_spins_a_full_extra_circle_above_80():
 
 
 def test_speed_doubles_at_the_donut_threshold():
+    # Speed now ramps up (see test_speed_ramps_up_smoothly), so give both
+    # states time to reach their cruising speed before comparing.
     d = Driver(park_below=50, donut_above=80)
     calm = DriveState(x=500.0)
     hot = DriveState(x=500.0)
-    d.step(calm, DT, 55, LEFT, RIGHT, CRUISE)
-    d.step(hot, DT, 85, LEFT, RIGHT, CRUISE)
+    for _ in range(60):
+        d.step(calm, DT, 55, LEFT, RIGHT, CRUISE)
+        d.step(hot, DT, 85, LEFT, RIGHT, CRUISE)
     assert hot.speed >= 2.0 * CRUISE         # "almost twice normal"
     assert calm.speed < 1.2 * CRUISE
+
+
+def test_speed_ramps_up_smoothly_not_instantly():
+    # The whole point of the accel/brake model: a single tiny tick must NOT
+    # jump straight to the target cruise speed.
+    d = Driver(park_below=50, donut_above=80)
+    st = DriveState(x=500.0)
+    d.step(st, DT, 90, LEFT, RIGHT, CRUISE)
+    assert 0.0 < st.speed < 2.0 * CRUISE * 0.5
+
+
+def test_car_brakes_smoothly_before_the_edge():
+    # As the car nears an edge its speed should fall well before it actually
+    # arrives — a real brake, not an instant stop at the boundary.
+    d = Driver(park_below=50, donut_above=200)  # keep this a plain turn
+    st = DriveState(x=RIGHT - 40, yaw=0.0, facing=1)
+    for _ in range(30):
+        d.step(st, DT, 70, LEFT, RIGHT, CRUISE)
+        if st.x >= RIGHT - 5 and not st.turning:
+            break
+    assert st.speed < CRUISE * 1.5 * 0.9     # braked down, not at full tilt
+
+
+def test_parks_facing_front():
+    d = Driver(park_below=50)
+    st = DriveState(x=200.0)
+    run(d, st, ram=30, seconds=30)
+    assert st.parked
+    assert math.isclose(st.yaw % 360.0, PARK_YAW, abs_tol=1.0)
+
+
+def test_donut_pivots_around_a_fixed_nose_point():
+    # With sprite_w_px supplied, the nose should stay near one screen point
+    # throughout the spin while the widget (x) swings to keep it there.
+    d = Driver(park_below=50, donut_above=80)
+    st = DriveState(x=RIGHT - 1, yaw=0.0, facing=1)
+    anchors = []
+    for _ in range(int(2 / DT)):
+        d.step(st, DT, 92, LEFT, RIGHT, CRUISE, sprite_w_px=SPRITE_W)
+        if st.turning:
+            nose_frac = 0.5 + 0.48 * math.cos(math.radians(st.yaw))
+            anchors.append(st.x + nose_frac * SPRITE_W)
+        if not st.turning and anchors:
+            break
+    assert len(anchors) > 5
+    assert max(anchors) - min(anchors) < 2.0   # nose held essentially still
 
 
 def test_turning_keeps_wheels_churning():

@@ -303,8 +303,10 @@ class LlamaBuddy(QtWidgets.QWidget):
             st.x = self._pos_x
             # Cruise pace: cross the screen in ~18 s; RAM adds up to ~2.6x.
             cruise = geo.width() / 18.0
+            sw, _ = self._sprite_units()
             self._driver.step(st, dt, self._ram_pct,
-                              float(left), float(right), cruise)
+                              float(left), float(right), cruise,
+                              sprite_w_px=sw * self._scale)
             self._pos_x = st.x
             self._facing = st.facing
             self.move(int(round(self._pos_x)), self.y())
