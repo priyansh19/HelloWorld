@@ -27,6 +27,49 @@ llama.cpp, LM Studio, …).
 
 ---
 
+## 🐾 Taskbar buddies — live monitors, in 3D
+
+Instead of a chart in the corner, let a character live on your taskbar and *be*
+the monitor. Pick one from the buddy's right-click menu: **Mustang**, **Fox**,
+or the classic pixel **Tortoise**. The Mustang and Fox are real **3D models**
+baked into transparent sprite frames (rendered with three.js), so they read
+crisply at any size.
+
+### 🏎️ Mustang — a 2019 Mustang RTR that reacts to RAM
+
+![Mustang buddy](assets/buddy-mustang.png)
+
+- **Parks** facing you in a screen corner while RAM is calm
+- **Drifts** back and forth along the taskbar as memory climbs — faster the
+  hotter it gets, wheels spinning with road speed
+- **Drifts *around* traffic cones** at each end (a real ground-plane orbit —
+  it tucks *behind* the cone, never airborne), and throws a **donut** past 80%
+- **Smokes** from the exhaust as a translucent plume that thickens with RAM
+  pressure — a light stream while cruising, a low burnout cloud when it's
+  really burning
+
+### 🦊 Fox — a live RAM gauge with a temper
+
+![Fox buddy](assets/buddy-fox.png)
+
+| RAM | The fox… |
+|---|---|
+| **< 75%** | curls up **asleep** in the left corner (with a floating `Zzz`) |
+| **75–90%** | **roams** the taskbar at a walk |
+| **90–95%** | **runs**, twice walking pace |
+| **≥ 95%** | goes into a **frenzy** — sprints and **jumps off the side walls** |
+
+Everything stays glued to the top of the taskbar. Click any buddy to pop the
+full stat card; drag it anywhere; it auto-hides when a fullscreen app is in
+front.
+
+> The Mustang is baked from a user-supplied `.glb`; the fox is the CC-BY
+> Khronos ["Fox"](https://github.com/KhronosGroup/glTF-Sample-Assets) sample
+> model (Walk/Run/Survey animations). Bring your own model and re-bake it with
+> `tools/render_glb.py` (vehicles) or `tools/render_animal.py` (animals).
+
+---
+
 ## Install with pip (recommended — no Smart App Control issues)
 
 Because the `.exe` is unsigned, **Windows Smart App Control** blocks it. Installing
@@ -140,16 +183,15 @@ from NVML.
 
 ## Display modes
 
-Toggle from the widget's ⋯ menu, the llama's right-click menu, or Settings →
+Toggle from the widget's ⋯ menu, the buddy's right-click menu, or Settings →
 Behaviour:
 
-- **Llama (default)** — a tiny pixel llama lives on your taskbar and *is* the
-  monitor: its **stride speed = CPU** (stroll → walk → gallop), its
-  **saddle-pack swells** past the amber RAM threshold, it puts **shades on**
-  while your tracked LLM process (e.g. `ollama.exe`) is running, and past the
-  red threshold it **panics** (red tint, sweat, `!!`). Hover for a quick
-  readout, **click it to pop the full stat card**, drag it anywhere along the
-  taskbar. It occasionally wanders a few pixels when relaxed (toggleable).
+- **Buddy (default)** — a character lives on your taskbar and *is* the monitor:
+  a 3D **Mustang** (parks / drifts / cone-drifts / smokes with RAM), a 3D
+  **Fox** (sleeps / roams / runs / frenzies with RAM), or the classic pixel
+  **Tortoise**. Hover for a quick readout, **click to pop the full stat card**,
+  drag it anywhere along the taskbar. See
+  [Taskbar buddies](#-taskbar-buddies--live-monitors-in-3d) above.
 - **Pinned** — the compact card stays on screen (drag it anywhere) until you
   hide or quit it.
 - **Peek** — the card hides at the right screen edge as a slim vertical
