@@ -1,0 +1,9 @@
+{
+  "clips": {
+    "Walk": 16,
+    "Run": 16
+  },
+  "pattern": "{clip}_{frame:02d}.webp",
+  "feet_y": 1.0,
+  "note": "frame faces screen-right; widget mirrors to walk left"
+}

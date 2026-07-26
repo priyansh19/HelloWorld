@@ -51,7 +51,8 @@ packages = ["memgraph"]
 [tool.setuptools.package-data]
 # Ship the bundled sensor DLLs if CI placed them here (optional; temps work
 # without them via NVML/WMI/ACPI).
-memgraph = ["lhm/*.dll", "assets/car3d/*.webp", "assets/car3d/*.json"]
+memgraph = ["lhm/*.dll", "assets/car3d/*.webp", "assets/car3d/*.json",
+            "assets/fox/*.webp", "assets/fox/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -25,6 +25,10 @@ for dll in glob.glob("lhm/*.dll"):
 # The baked 3D car atlas — without it the buddy falls back to the vector car.
 for f in glob.glob("memgraph/assets/car3d/*"):
     datas.append((f, "memgraph/assets/car3d"))
+# The baked 3D fox walk-cycle atlas — without it the fox character falls back
+# to the pixel tortoise.
+for f in glob.glob("memgraph/assets/fox/*"):
+    datas.append((f, "memgraph/assets/fox"))
 
 # pythonnet / clr_loader must be fully collected for the frozen build.
 for pkg in ("pythonnet", "clr_loader"):

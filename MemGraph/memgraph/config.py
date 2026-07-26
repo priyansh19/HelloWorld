@@ -69,7 +69,7 @@ class Config:
     llama_scale: float = 4.05      # size multiplier for the buddy sprite
     # Which character the taskbar buddy is: the tortoise, or a matte-black
     # Mustang that drifts along the taskbar and smokes when RAM burns.
-    buddy_character: str = "car"   # "car" | "tortoise"
+    buddy_character: str = "car"   # "car" | "fox" | "tortoise"
     car_smoke: bool = True         # translucent RAM-pressure smoke plume
     # Below this RAM % the car parks at a screen corner; above it, it drifts
     # (with a little hysteresis in the widget so it doesn't flap at the line).
@@ -116,7 +116,7 @@ class Config:
         self.llama_x = _clamp_int(self.llama_x, -1, 20000, -1)
         self.llama_cross_seconds = _clamp_int(self.llama_cross_seconds, 20, 3600, 180)
         self.llama_scale = _clamp_float(self.llama_scale, 0.8, 6.0, 4.05)
-        if self.buddy_character not in ("car", "tortoise"):
+        if self.buddy_character not in ("car", "fox", "tortoise"):
             self.buddy_character = "car"
         self.car_park_below = _clamp_int(self.car_park_below, 0, 100, 50)
 

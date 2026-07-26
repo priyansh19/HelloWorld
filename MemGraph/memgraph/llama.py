@@ -20,7 +20,7 @@ from typing import Callable, Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from . import buddy_logic, car3d, car_art
+from . import animal3d, buddy_logic, car3d, car_art
 from .buddy_logic import mood_for
 from .config import Config
 from .drive_logic import Driver, DriveState
@@ -28,14 +28,16 @@ from .metrics import MetricsSampler
 
 
 def _sprite_module(character: str):
-    """The art module for the chosen character ("tortoise" or "car").
+    """The art module for the chosen character ("fox" | "tortoise" | "car").
 
-    The car prefers the baked 3D atlas (real model, yaw ring, spinning
-    wheels); the vector drawing remains as the fallback for source builds
-    without the baked assets.
+    The car prefers the baked 3D atlas (yaw ring, spinning wheels); the fox is
+    a baked 3D walk-cycle atlas. Both fall back to a hand-drawn sprite (the
+    vector car / the pixel tortoise) when their baked assets are absent.
     """
     if character == "car":
         return car3d if car3d.available() else car_art
+    if character == "fox":
+        return animal3d if animal3d.available() else buddy_logic
     return buddy_logic
 
 _SCALE_BASE = 1.0      # px per sprite cell, multiplied by cfg.llama_scale
@@ -81,6 +83,7 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._mood = mood_for(0, 0, config.threshold_amber,
                               config.threshold_red, False)
         self._frame_i = 0
+        self._walk_phase = 0.0         # baked-animal walk-cycle position
         self._blink = False
         self._facing = 1              # 1 → right, -1 → left
         self._drag_x: Optional[int] = None
@@ -156,7 +159,7 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._tooltip = "  ·  ".join(tip)
         self.setToolTip(self._tooltip)
         self._update_smoke(self._mood.stress)
-        if self._art is not car3d:
+        if self._art is not car3d and self._art is not animal3d:
             self.update()
 
     def _sprite_units(self) -> tuple[int, int]:
@@ -259,8 +262,8 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._frame_i += 1
         # Occasional blink (only matters when shades are off).
         self._blink = (random.random() < 0.12)
-        if self._art is not car3d:
-            self.update()      # the 3D car repaints only on frame change
+        if self._art is not car3d and self._art is not animal3d:
+            self.update()      # baked 3D buddies repaint only on frame change
 
     def _update_fullscreen_visibility(self) -> None:
         """Hide while a fullscreen app (video/game) is in front; restore after.
@@ -333,6 +336,32 @@ class LlamaBuddy(QtWidgets.QWidget):
                              sw * self._scale, sh * self._scale)
             if self._smoke is not None and self._smoke.isVisible():
                 self._update_smoke(self._mood.stress)
+            return
+
+        # Baked 3D animal: walk (or run, when RAM is hot) back and forth, the
+        # walk cycle advancing with distance travelled so the legs match the
+        # ground speed instead of foot-skating.
+        if self._art is animal3d:
+            if not self.cfg.llama_wander:
+                return
+            running = self._mood.stress >= animal3d.RUN_STRESS
+            speed = (geo.width() / 22.0) * (1.9 if running else 1.0) \
+                * self._ram_speed_mult(self._ram_pct)
+            self._pos_x += self._facing * speed * dt
+            if self._pos_x <= left:
+                self._pos_x, self._facing = float(left), 1
+            elif self._pos_x >= right:
+                self._pos_x, self._facing = float(right), -1
+            self.move(int(round(self._pos_x)), self.y())
+            sw, _ = self._sprite_units()
+            stride_px = max(1.0, 0.55 * sw * self._scale)   # px per full cycle
+            self._walk_phase += abs(speed) * dt / stride_px
+            clip = animal3d.clip_for_stress(self._mood.stress)
+            n = animal3d.atlas().frame_count(clip)
+            key = (self._facing, clip, int(self._walk_phase * n) % n)
+            if key != self._last_frame_key:
+                self._last_frame_key = key
+                self.update()
             return
 
         if not self.cfg.llama_wander:
@@ -441,6 +470,23 @@ class LlamaBuddy(QtWidgets.QWidget):
                 p.drawImage(QtCore.QRectF(ox, oy, w, h), img)
             return
 
+        # Baked 3D animal (the fox): a walk/run cycle frame, mirrored to face
+        # its travel direction.
+        if art is animal3d:
+            sw, sh = self._sprite_units()
+            w, h = sw * s, sh * s
+            clip = animal3d.clip_for_stress(m.stress)
+            img = animal3d.frame_image(int(round(w)), clip, self._walk_phase)
+            if img is not None:
+                p.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
+                p.save()
+                if self._facing == -1:
+                    p.translate(self.width(), 0)
+                    p.scale(-1, 1)
+                p.drawImage(QtCore.QRectF(ox, oy, w, h), img)
+                p.restore()
+            return
+
         # Vector characters rasterise to a cached high-resolution image
         # rather than a grid of cells.
         if getattr(art, "IS_VECTOR", False):
@@ -540,12 +586,15 @@ class LlamaBuddy(QtWidgets.QWidget):
         menu = QtWidgets.QMenu(self)
         menu.addAction("Open stats", self.clicked.emit)
         menu.addSeparator()
-        car = self.cfg.buddy_character == "car"
-        menu.addAction(("✓ " if car else "") + "Mustang",
+        char = self.cfg.buddy_character
+        tick = lambda c: "✓ " if char == c else ""
+        menu.addAction(tick("car") + "Mustang",
                        lambda: self.request_character.emit("car"))
-        menu.addAction(("✓ " if not car else "") + "Tortoise",
+        menu.addAction(tick("fox") + "Fox",
+                       lambda: self.request_character.emit("fox"))
+        menu.addAction(tick("tortoise") + "Tortoise",
                        lambda: self.request_character.emit("tortoise"))
-        if car:
+        if char == "car":
             menu.addAction(("✓ " if self.cfg.car_smoke else "") + "RAM smoke",
                            lambda: self.request_smoke.emit(not self.cfg.car_smoke))
         menu.addSeparator()
