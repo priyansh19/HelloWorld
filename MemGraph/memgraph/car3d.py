@@ -83,20 +83,36 @@ class _Atlas:
             self._raw[key] = img
         return img
 
+    @staticmethod
+    def _dpr() -> float:
+        """The real device pixel ratio of the primary screen.
+
+        Caching at a fixed 2x meant every paint on a standard-DPI display had
+        to smooth-downscale a double-size image — a full bilinear rescale per
+        frame for nothing. Scaling the cache to the actual DPR makes painting
+        a plain 1:1 blit.
+        """
+        scr = QtGui.QGuiApplication.primaryScreen()
+        try:
+            return max(1.0, float(scr.devicePixelRatio())) if scr else 1.0
+        except RuntimeError:
+            return 1.0
+
     def frame(self, px_w: int, yaw_i: int, spin_i: int) -> QtGui.QImage | None:
         yaw_i %= self.frames
         spin_i %= self.spin_count(yaw_i)
+        dpr = self._dpr()
         key = (px_w, yaw_i, spin_i)
         img = self._scaled.get(key)
         if img is None:
             raw = self._load_raw(yaw_i, spin_i)
             if raw is None:
                 return None
-            out_w = px_w * 2                      # 2x for HiDPI crispness
+            out_w = max(1, round(px_w * dpr))
             out_h = max(1, round(out_w * raw.height() / raw.width()))
             img = raw.scaled(out_w, out_h, QtCore.Qt.IgnoreAspectRatio,
                              QtCore.Qt.SmoothTransformation)
-            img.setDevicePixelRatio(2.0)
+            img.setDevicePixelRatio(dpr)
             # keep the scaled cache bounded (a few sizes x 192 frames adds up)
             if len(self._scaled) > 640:
                 self._scaled.clear()
@@ -153,6 +169,18 @@ def sprite_units() -> tuple[int, int]:
 # ------------------------------------------------------------------ #
 # Frame lookup used by the widget
 # ------------------------------------------------------------------ #
+def frame_key(yaw_deg: float, spin_phase: float) -> tuple[int, int] | None:
+    """The (yaw index, spin index) the given pose resolves to — lets the
+    widget skip repaints entirely while the visible frame is unchanged."""
+    a = atlas()
+    if a is None:
+        return None
+    yaw_i = round((yaw_deg % 360.0) / 360.0 * a.frames) % a.frames
+    n = a.spin_count(yaw_i)
+    spin_i = int(spin_phase % 1.0 * n) % n
+    return yaw_i, spin_i
+
+
 def frame_image(px_w: int, yaw_deg: float, spin_phase: float) -> QtGui.QImage | None:
     """The atlas frame nearest ``yaw_deg`` at ``spin_phase`` in [0, 1)."""
     a = atlas()

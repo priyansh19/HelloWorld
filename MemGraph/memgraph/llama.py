@@ -110,6 +110,8 @@ class LlamaBuddy(QtWidgets.QWidget):
         # side so the park/drift behaviour is unit-testable.
         self._driver = Driver(park_below=config.car_park_below)
         self._drive = DriveState(x=float(self.x()))
+        self._last_frame_key = None   # (yaw_i, spin_i) of the painted frame
+        self._cones: list = []        # the two drift cones (car mode only)
         # Smooth, high-frequency movement independent of the sprite cadence.
         # PreciseTimer + measured dt: Windows coalesces coarse timers, and a
         # fixed-dt assumption turns that jitter into visible speed surging.
@@ -154,7 +156,8 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._tooltip = "  ·  ".join(tip)
         self.setToolTip(self._tooltip)
         self._update_smoke(self._mood.stress)
-        self.update()
+        if self._art is not car3d:
+            self.update()
 
     def _sprite_units(self) -> tuple[int, int]:
         """Sprite width/height in sizing units — a supplied picture may set its
@@ -179,6 +182,7 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._recompute_size()
         if cfg.buddy_character != "car":
             self._stop_smoke()
+            self._hide_cones()
         self._driver = Driver(park_below=cfg.car_park_below)
         self.tick()
         self._dock()
@@ -188,23 +192,21 @@ class LlamaBuddy(QtWidgets.QWidget):
 
     def _warm_frames(self) -> None:
         """Pre-scale atlas frames for the current size so painting never has
-        to scale on demand — the first drift/turn stays hitch-free. The two
-        driving headings are warmed immediately; the rest of the turn ring is
-        spread across idle timer slots."""
+        to scale on demand. QImage scaling is thread-safe, so the whole ring
+        warms on a daemon thread — zero jank on the GUI thread (the timer
+        version stuttered visibly for the first seconds after launch)."""
         if self._art is not car3d or not car3d.available():
             return
         sw, _ = self._sprite_units()
         px_w = int(round(sw * self._scale))
-        car3d.warm(px_w)                     # driving headings, all spins
         a = car3d.atlas()
-        pending = [y for y in range(a.frames) if y not in (0, a.frames // 2)]
 
-        def warm_next() -> None:
-            if pending:
-                car3d.warm(px_w, [pending.pop()])
-                QtCore.QTimer.singleShot(50, warm_next)
+        def warm_all() -> None:
+            car3d.warm(px_w)                 # driving headings first
+            for y in range(a.frames):
+                car3d.warm(px_w, [y])
 
-        QtCore.QTimer.singleShot(200, warm_next)
+        threading.Thread(target=warm_all, daemon=True).start()
 
     # ------------------------------------------------------------------ #
     # RAM "burnout" smoke (car character only)
@@ -257,7 +259,8 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._frame_i += 1
         # Occasional blink (only matters when shades are off).
         self._blink = (random.random() < 0.12)
-        self.update()
+        if self._art is not car3d:
+            self.update()      # the 3D car repaints only on frame change
 
     def _update_fullscreen_visibility(self) -> None:
         """Hide while a fullscreen app (video/game) is in front; restore after.
@@ -270,6 +273,7 @@ class LlamaBuddy(QtWidgets.QWidget):
             self._fs_hidden = True
             self.hide()
             self._stop_smoke()
+            self._hide_cones()
         elif not fs and self._fs_hidden:
             self._fs_hidden = False
             self.show()
@@ -307,15 +311,26 @@ class LlamaBuddy(QtWidgets.QWidget):
             st.x = self._pos_x
             # Cruise pace: cross the screen in ~18 s; RAM adds up to ~2.6x.
             cruise = geo.width() / 18.0
-            sw, _ = self._sprite_units()
+            sw, sh = self._sprite_units()
             self._driver.step(st, dt, self._ram_pct,
                               float(left), float(right), cruise,
-                              sprite_w_px=sw * self._scale)
+                              sprite_w_px=sw * self._scale,
+                              sprite_h_px=sh * self._scale)
             self._pos_x = st.x
             self._facing = st.facing
-            self.move(int(round(self._pos_x)), self.y())
-            if st.speed > 0 or st.turning:
-                self.update()             # yaw/wheels changed -> repaint
+            base_y = geo.bottom() - self.height() + 1
+            self.move(int(round(self._pos_x)),
+                      base_y - int(round(st.y_off)))
+            # Repaint ONLY when the visible frame actually changes. A move()
+            # of a layered window is cheap; update() re-uploads the whole
+            # window bitmap to the compositor — while cruising straight only
+            # the wheel phase changes (~14x/s), not every step.
+            key = car3d.frame_key(st.yaw, self._driver.spin_phase(st))
+            if key != self._last_frame_key:
+                self._last_frame_key = key
+                self.update()
+            self._sync_cones(geo, float(left), float(right),
+                             sw * self._scale, sh * self._scale)
             if self._smoke is not None and self._smoke.isVisible():
                 self._update_smoke(self._mood.stress)
             return
@@ -335,6 +350,34 @@ class LlamaBuddy(QtWidgets.QWidget):
         self.move(int(round(self._pos_x)), self.y())
         if self._smoke is not None and self._smoke.isVisible():
             self._update_smoke(self._mood.stress)   # plume follows the exhaust
+
+    # ------------------------------------------------------------------ #
+    # Drift cones
+    # ------------------------------------------------------------------ #
+    def _sync_cones(self, geo: QtCore.QRect, left: float, right: float,
+                    sprite_w_px: float, sprite_h_px: float) -> None:
+        """Stand a cone at the centre of each drift loop. Static windows —
+        they only move when the screen layout or car size changes."""
+        from .cones import ConeWidget
+        from .drive_logic import CONE_H_FRAC, cone_centers
+        if not self._cones:
+            self._cones = [ConeWidget(), ConeWidget()]
+        cx_l, cx_r = cone_centers(left, right, float(self.width()),
+                                  sprite_w_px)
+        h = int(CONE_H_FRAC * sprite_h_px)
+        placement = (int(cx_l), int(cx_r), h, geo.bottom())
+        if getattr(self, "_cone_placement", None) != placement:
+            self._cone_placement = placement
+            for cone, cx in zip(self._cones, (cx_l, cx_r)):
+                cone.set_cone_size(h)
+                cone.place(int(cx), geo.bottom())
+        for cone in self._cones:
+            if not cone.isVisible():
+                cone.show()
+
+    def _hide_cones(self) -> None:
+        for cone in self._cones:
+            cone.hide()
 
     # ------------------------------------------------------------------ #
     # Placement
@@ -462,6 +505,10 @@ class LlamaBuddy(QtWidgets.QWidget):
             if self._on_move:
                 self._on_move(self.x())
         e.accept()
+
+    def hideEvent(self, e: QtGui.QHideEvent) -> None:
+        self._hide_cones()
+        super().hideEvent(e)
 
     def contextMenuEvent(self, e: QtGui.QContextMenuEvent) -> None:
         menu = QtWidgets.QMenu(self)

@@ -23,8 +23,10 @@ from dataclasses import dataclass
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-_FPS_MS = 33
-_MAX_PUFFS = 220          # hard cap so a pegged machine can't drown in puffs
+_FPS_MS = 40              # 25 fps — every smoke frame re-uploads the whole
+                          # band bitmap to the compositor, so the frame rate
+                          # is the main lever on its cost
+_MAX_PUFFS = 140          # hard cap so a pegged machine can't drown in puffs
 _BASE_ALPHA = 30          # peak per-puff alpha (out of 255) — very see-through
 _RISE_INCHES = 2.0        # how far above the exhaust the smoke may climb
 _BAND_HEADROOM = 90       # extra window pixels above the rise cap for puff radii
@@ -67,6 +69,7 @@ class SmokeOverlay(QtWidgets.QWidget):
 
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self._step)
+        self._puff_sprite: QtGui.QImage | None = None
 
     # ------------------------------------------------------------------ #
     def cover_screen(self, geo: QtCore.QRect) -> None:
@@ -158,13 +161,35 @@ class SmokeOverlay(QtWidgets.QWidget):
         ))
 
     # ------------------------------------------------------------------ #
+    def _sprite(self) -> QtGui.QImage:
+        """One pre-rendered soft puff, tinted grey.
+
+        Radial gradients are the most expensive brush in Qt's raster engine;
+        rendering the gradient once and blitting the cached image per puff is
+        an order of magnitude cheaper — this is what makes the smoke afford
+        able while the car drives all day.
+        """
+        if self._puff_sprite is None:
+            size = 128
+            img = QtGui.QImage(size, size, QtGui.QImage.Format_ARGB32_Premultiplied)
+            img.fill(QtCore.Qt.transparent)
+            p = QtGui.QPainter(img)
+            p.setPen(QtCore.Qt.NoPen)
+            grad = QtGui.QRadialGradient(size / 2, size / 2, size / 2)
+            grad.setColorAt(0.0, QtGui.QColor(190, 192, 198, 255))
+            grad.setColorAt(0.6, QtGui.QColor(170, 172, 180, 140))
+            grad.setColorAt(1.0, QtGui.QColor(150, 152, 160, 0))
+            p.setBrush(grad)
+            p.drawEllipse(0, 0, size, size)
+            p.end()
+            self._puff_sprite = img
+        return self._puff_sprite
+
     def paintEvent(self, _e: QtGui.QPaintEvent) -> None:
         if not self._puffs:
             return
         p = QtGui.QPainter(self)
-        # No antialiasing: the radial gradients are soft-edged already, and
-        # skipping AA keeps this band cheap to repaint at 30 fps.
-        p.setPen(QtCore.Qt.NoPen)
+        sprite = self._sprite()
         rise = max(1.0, self._rise_px)
         src_y = self._src.y()
         for pf in self._puffs:
@@ -172,13 +197,9 @@ class SmokeOverlay(QtWidgets.QWidget):
             fade = (1.0 - frac) * min(1.0, pf.age * 6.0)     # quick fade-in
             # thin out as it climbs; fully evaporated at the two-inch cap
             climb = max(0.0, min(1.0, (src_y - pf.y) / rise))
-            a = int(_BASE_ALPHA * fade * (1.0 - climb) ** 1.15
-                    * self._intensity)
-            if a <= 1:
+            a = _BASE_ALPHA * fade * (1.0 - climb) ** 1.15 * self._intensity
+            if a <= 1.5:
                 continue
-            grad = QtGui.QRadialGradient(pf.x, pf.y, max(1.0, pf.r))
-            grad.setColorAt(0.0, QtGui.QColor(190, 192, 198, a))
-            grad.setColorAt(0.6, QtGui.QColor(170, 172, 180, int(a * 0.55)))
-            grad.setColorAt(1.0, QtGui.QColor(150, 152, 160, 0))
-            p.setBrush(grad)
-            p.drawEllipse(QtCore.QPointF(pf.x, pf.y), pf.r, pf.r)
+            p.setOpacity(a / 255.0)
+            p.drawImage(QtCore.QRectF(pf.x - pf.r, pf.y - pf.r,
+                                      2 * pf.r, 2 * pf.r), sprite)
