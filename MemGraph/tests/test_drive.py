@@ -132,20 +132,41 @@ def test_parks_facing_front():
 
 
 def test_donut_pivots_around_a_fixed_nose_point():
-    # With sprite_w_px supplied, the nose should stay near one screen point
-    # throughout the spin while the widget (x) swings to keep it there.
+    # Pure pivot-formula check, given room to spare: start the spin directly
+    # (rather than via an edge bounce, which by construction leaves zero
+    # clearance on one side — see test_donut_never_pushes_the_widget_off_screen
+    # for that safety-critical case) and confirm the nose stays essentially
+    # fixed while the widget position swings to hold it there.
     d = Driver(park_below=50, donut_above=80)
+    wide_right = RIGHT + 500.0    # plenty of clearance either side
     st = DriveState(x=RIGHT - 1, yaw=0.0, facing=1)
+    d._begin_turn_if_needed(st, donut=True, sprite_w_px=SPRITE_W)
     anchors = []
     for _ in range(int(2 / DT)):
-        d.step(st, DT, 92, LEFT, RIGHT, CRUISE, sprite_w_px=SPRITE_W)
-        if st.turning:
-            nose_frac = 0.5 + 0.48 * math.cos(math.radians(st.yaw))
-            anchors.append(st.x + nose_frac * SPRITE_W)
-        if not st.turning and anchors:
+        d.step(st, DT, 92, LEFT, wide_right, CRUISE, sprite_w_px=SPRITE_W)
+        if not st.turning:
             break
+        nose_frac = 0.5 + 0.48 * math.cos(math.radians(st.yaw))
+        anchors.append(st.x + nose_frac * SPRITE_W)
     assert len(anchors) > 5
     assert max(anchors) - min(anchors) < 2.0   # nose held essentially still
+
+
+def test_donut_never_pushes_the_widget_off_screen():
+    # A donut always starts flush against the edge that triggered it (the
+    # normal, only way it triggers in the app), so for part of the spin the
+    # ideal nose-locked position would sit past that edge. Staying on-screen
+    # must win over a perfectly pinned nose in that squeeze.
+    d = Driver(park_below=50, donut_above=80)
+    st = DriveState(x=RIGHT, yaw=0.0, facing=1)
+    xs = []
+    for _ in range(int(2 / DT)):
+        d.step(st, DT, 92, LEFT, RIGHT, CRUISE, sprite_w_px=SPRITE_W)
+        xs.append(st.x)
+        if not st.turning:
+            break
+    assert xs, "the donut never actually ran"
+    assert all(LEFT <= x <= RIGHT for x in xs)     # never off-screen
 
 
 def test_turning_keeps_wheels_churning():

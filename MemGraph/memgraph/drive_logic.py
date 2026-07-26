@@ -152,7 +152,11 @@ class Driver:
                 st.turning = False
                 st._ang_speed = 0.0
             if st._is_donut and sprite_w_px > 0:
-                st.x = st._pivot_anchor_x - _nose_u(st.yaw) * sprite_w_px
+                # Clamped: the nose anchor can sit close to an edge, and the
+                # swing as the rear rotates around it must never push the
+                # widget past the screen bounds.
+                pivot_x = st._pivot_anchor_x - _nose_u(st.yaw) * sprite_w_px
+                st.x = max(left, min(right, pivot_x))
             # burnout: wheels churn through the slide at the pre-turn rate
             st.spin += max(st.speed, cruise_px_s) * dt / self.wheel_circ
             return st

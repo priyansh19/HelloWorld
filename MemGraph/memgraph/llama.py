@@ -41,7 +41,11 @@ def _sprite_module(character: str):
 _SCALE_BASE = 1.0      # px per sprite cell, multiplied by cfg.llama_scale
                        # (the tortoise sprite is high-resolution: 54x34 cells)
 _METRICS_MS = 1000
-_MOVE_MS = 16          # ~60 fps movement stepper (real dt measured per step)
+_MOVE_MS = 30          # ~33 fps movement stepper (real dt measured per step)
+                       # — the car widget is a large translucent always-on-top
+                       # window now, and DWM compositing cost scales with both
+                       # window area and repaint rate; 33fps keeps it smooth
+                       # while roughly halving that cost versus 60fps.
 # Travel speed multiplier per gait. Kept close to 1 so the llama always strolls
 # at a visible, mild pace (CPU load just nudges it a bit faster).
 _GAIT_SPEED = {"idle": 0.85, "walk": 1.0, "gallop": 1.6}
