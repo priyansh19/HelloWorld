@@ -359,21 +359,35 @@ class LlamaBuddy(QtWidgets.QWidget):
         """Stand a cone at the centre of each drift loop. Static windows —
         they only move when the screen layout or car size changes."""
         from .cones import ConeWidget
-        from .drive_logic import CONE_H_FRAC, cone_centers
+        from .drive_logic import (CONE_H_FRAC, LOOP_DEPTH_FRAC, cone_centers)
         if not self._cones:
             self._cones = [ConeWidget(), ConeWidget()]
         cx_l, cx_r = cone_centers(left, right, float(self.width()),
                                   sprite_w_px)
         h = int(CONE_H_FRAC * sprite_h_px)
-        placement = (int(cx_l), int(cx_r), h, geo.bottom())
+        # The cone stands at the orbit's centre depth, half a lane into the
+        # shallow fake-perspective ground — between the near pass (taskbar
+        # level) and the far pass behind it.
+        base_y = geo.bottom() - int(LOOP_DEPTH_FRAC * sprite_h_px / 2)
+        placement = (int(cx_l), int(cx_r), h, base_y)
         if getattr(self, "_cone_placement", None) != placement:
             self._cone_placement = placement
             for cone, cx in zip(self._cones, (cx_l, cx_r)):
                 cone.set_cone_size(h)
-                cone.place(int(cx), geo.bottom())
+                cone.place(int(cx), base_y)
         for cone in self._cones:
             if not cone.isVisible():
                 cone.show()
+        # Occlusion: on the far side of an orbit the cone must draw OVER the
+        # car. Stacking flips only when the side actually changes.
+        behind = self._drive.behind
+        if getattr(self, "_car_behind_cones", None) != behind:
+            self._car_behind_cones = behind
+            if behind:
+                for cone in self._cones:
+                    cone.raise_()
+            else:
+                self.raise_()
 
     def _hide_cones(self) -> None:
         for cone in self._cones:

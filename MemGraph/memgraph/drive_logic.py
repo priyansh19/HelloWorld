@@ -17,12 +17,14 @@ Behaviour spec:
 * RAM above the line → it drifts back and forth along the taskbar; cruise
   speed climbs with RAM (roughly doubling past ``donut_above``).
 * Near each end of the screen stands a **traffic cone**. Instead of spinning
-  in place, the car *drifts around the cone*: it slides along the taskbar in
-  front of the cone, then arcs up and over it — lifting off the bar, yaw
-  sweeping through the 3D ring — and lands on the middle side heading back
-  the other way, having circled the cone while nearly touching it.
-* Past ``donut_above`` the loop gains a full extra 360 of yaw spin on the
-  arc — the car corkscrews around the cone while it loops.
+  in place, the car *drifts around the cone* in the ground plane — it never
+  leaves the road. Viewed from the side, it swings past the cone on the
+  outside, tucks in BEHIND it (the cone occludes the car, and the car sits a
+  few pixels higher — the far lane of a shallow perspective ground), and
+  comes back out heading the other way, yaw sweeping through the 3D ring the
+  whole way round.
+* Past ``donut_above`` the loop is a full extra orbit — the car circles the
+  cone completely (front, outside, behind) before peeling off.
 * Wheel spin rate is proportional to road speed at all times, churning
   through every loop like a proper burnout.
 """
@@ -48,13 +50,13 @@ ANGULAR_ACCEL = 2600.0
 ANGULAR_BRAKE = 3600.0
 
 # Cone-loop geometry, as fractions of the sprite's on-screen size. The loop's
-# horizontal radius controls how tight the circle around the cone is; the lift
-# is how high the car rises over the cone on the return arc. The cone itself
-# is drawn a whisker shorter than the lift so the car clears it by a hair —
-# "nearly not touching".
-LOOP_R_FRAC = 0.55       # horizontal radius vs sprite width
-LOOP_LIFT_FRAC = 0.52    # arc height vs sprite height
-CONE_H_FRAC = 0.44       # cone height vs sprite height (< LOOP_LIFT_FRAC)
+# horizontal radius controls how tight the circle around the cone is. The
+# orbit stays in the ground plane: the far half of the circle renders a few
+# pixels higher on screen (the "far lane" of a shallow perspective ground)
+# and behind the cone — never airborne.
+LOOP_R_FRAC = 0.55       # orbit radius vs sprite width
+LOOP_DEPTH_FRAC = 0.22   # far-lane screen offset vs sprite height
+CONE_H_FRAC = 0.44       # cone height vs sprite height
 
 # The slowest the car will take a loop, as a fraction of its cruise target —
 # a drift carries momentum; it never crawls around the cone.
@@ -111,6 +113,7 @@ class DriveState:
     parked: bool = False
     turning: bool = False     # in-place pivot (parking / pulling out)
     looping: bool = False     # drifting around a cone
+    behind: bool = False      # on the far side — the cone occludes the car
     speed: float = 0.0        # current road speed, px/s (eased, not target)
     park_side: int = 0        # -1 left corner, +1 right corner, 0 undecided
     # in-place pivot bookkeeping
@@ -118,13 +121,12 @@ class DriveState:
     _sweep_left: float = field(default=0.0, repr=False)
     _turn_dir: float = field(default=1.0, repr=False)
     _ang_speed: float = field(default=0.0, repr=False)
-    # cone-loop bookkeeping
+    # cone-loop bookkeeping (orbit angle in degrees; see _loop_step)
     _loop_side: int = field(default=1, repr=False)        # +1 right, -1 left
-    _loop_stage: int = field(default=1, repr=False)       # 1 pass, 2 arc
-    _loop_t: float = field(default=0.0, repr=False)       # 0..1 per stage
+    _loop_theta: float = field(default=270.0, repr=False)
+    _loop_end: float = field(default=450.0, repr=False)
     _loop_speed: float = field(default=0.0, repr=False)
-    _loop_yaw0: float = field(default=0.0, repr=False)
-    _loop_sweep: float = field(default=180.0, repr=False)  # arc yaw sweep
+    _depth_px: float = field(default=0.0, repr=False)
 
 
 class Driver:
@@ -165,6 +167,14 @@ class Driver:
         if st.looping:
             self._loop_step(st, dt, left, right, sprite_w_px, sprite_h_px)
             return st
+
+        # ---- easing back to the near lane after a loop ----------------
+        if st.y_off > 0.0:
+            fall = max(20.0, st._depth_px / 0.35)      # ~0.35 s to rejoin
+            st.y_off = max(0.0, st.y_off - fall * dt)
+            if st.y_off <= 0.5:
+                st.y_off = 0.0
+                st.behind = False
 
         # ---- in-place pivot (parking or pulling out) -----------------
         if st.turning:
@@ -213,12 +223,14 @@ class Driver:
 
         if sprite_w_px > 0:
             r = loop_radius(sprite_w_px)
-            if st.facing > 0 and st.x >= right - 2.0 * r:
+            if st.facing > 0 and st.x >= right - r:
                 self._begin_loop(st, side=1, ram_pct=ram_pct,
-                                 cruise=target_speed)
-            elif st.facing < 0 and st.x <= left + 2.0 * r:
+                                 cruise=target_speed,
+                                 sprite_h_px=sprite_h_px)
+            elif st.facing < 0 and st.x <= left + r:
                 self._begin_loop(st, side=-1, ram_pct=ram_pct,
-                                 cruise=target_speed)
+                                 cruise=target_speed,
+                                 sprite_h_px=sprite_h_px)
         # safety clamp for tiny screens / missing sprite size
         if st.x <= left:
             st.x = left
@@ -234,58 +246,57 @@ class Driver:
     # Cone loops
     # -------------------------------------------------------------- #
     def _begin_loop(self, st: DriveState, side: int, ram_pct: float,
-                    cruise: float) -> None:
+                    cruise: float, sprite_h_px: float) -> None:
+        """Join the cone's orbit at its near-side point.
+
+        The orbit is a ground-plane circle around the cone, parametrised by
+        ``theta``: 270 is directly in FRONT of the cone (near lane — where a
+        car cruising past naturally sits, heading unchanged), 0/360 is the
+        outside extreme level with the cone, 90/450 directly BEHIND it. A
+        turn-around is half an orbit (270 -> 450); past the donut threshold
+        the car does a full extra circle first (270 -> 810).
+        """
         st.looping = True
         st._loop_side = side
-        st._loop_stage = 1
-        st._loop_t = 0.0
+        st._loop_theta = 270.0
+        st._loop_end = 270.0 + 180.0 + \
+            (360.0 if ram_pct >= self.donut_above else 0.0)
         st._loop_speed = max(st.speed, LOOP_MIN_SPEED_FRAC * cruise)
-        st._loop_yaw0 = 0.0 if side > 0 else 180.0
-        # past the donut threshold the arc carries a full extra revolution —
-        # the car corkscrews around the cone as it loops it
-        st._loop_sweep = 180.0 + (360.0 if ram_pct >= self.donut_above else 0.0)
+        st._depth_px = LOOP_DEPTH_FRAC * max(1.0, sprite_h_px)
 
     def _loop_step(self, st: DriveState, dt: float, left: float, right: float,
                    sprite_w_px: float, sprite_h_px: float) -> None:
         r = loop_radius(sprite_w_px)
-        lift = LOOP_LIFT_FRAC * (sprite_h_px if sprite_h_px > 0
-                                 else 0.4 * sprite_w_px)
         v = st._loop_speed
+        st.speed = v
         st.spin += v * dt / self.wheel_circ      # wheels churn throughout
 
-        if st._loop_stage == 1:
-            # slide along the taskbar in FRONT of the cone
-            st._loop_t = min(1.0, st._loop_t + v * dt / (2.0 * r))
-            t = st._loop_t
-            if st._loop_side > 0:
-                st.x = (right - 2.0 * r) + t * 2.0 * r
-            else:
-                st.x = (left + 2.0 * r) - t * 2.0 * r
-            st.y_off = 0.0
-            st.yaw = st._loop_yaw0
-            if t >= 1.0:
-                st._loop_stage = 2
-                st._loop_t = 0.0
-            return
+        # advance around the circle at the drift's road speed
+        st._loop_theta += math.degrees(v * dt / r)
+        done = st._loop_theta >= st._loop_end
+        theta = min(st._loop_theta, st._loop_end)
+        a = math.radians(theta)
 
-        # stage 2: arc up and OVER the cone, back to the middle side
-        st._loop_t = min(1.0, st._loop_t + v * dt / (math.pi * r))
-        t = st._loop_t
-        a = math.radians(180.0 * t)
+        cone_wx = (right - r) if st._loop_side > 0 else (left + r)
+        st.x = cone_wx + st._loop_side * r * math.cos(a)
+        st.x = max(left, min(right, st.x))
+        # ground-plane depth: the far half of the orbit sits a few pixels
+        # higher on screen (far lane) and behind the cone — never airborne.
+        z = math.sin(a)                          # -1 near .. +1 far
+        st.y_off = st._depth_px * (z + 1.0) / 2.0
+        st.behind = z > 0.0
+        # heading = the orbit's tangent, mapped onto the baked yaw ring
+        # (yaw 0 faces screen-right, yaw 90 faces away from the viewer)
         if st._loop_side > 0:
-            st.x = (right - r) + r * math.cos(a)
+            st.yaw = (theta + 90.0) % 360.0
         else:
-            st.x = (left + r) - r * math.cos(a)
-        st.y_off = lift * math.sin(a)
-        # smooth-step the yaw sweep so the rotation eases in and out of the arc
-        smooth = t * t * (3.0 - 2.0 * t)
-        st.yaw = (st._loop_yaw0 + st._loop_sweep * smooth) % 360.0
-        if t >= 1.0:
+            st.yaw = (90.0 - theta) % 360.0
+
+        if done:
             st.looping = False
-            st.y_off = 0.0
             st.facing = -st._loop_side
-            st.yaw = (st._loop_yaw0 + 180.0) % 360.0
-            st.speed = v                     # carry the drift's momentum out
+            st.yaw = 0.0 if st.facing == 1 else 180.0
+            # y_off/behind ease back to the near lane during cruising
 
     # -------------------------------------------------------------- #
     def _begin_turn_if_needed(self, st: DriveState,

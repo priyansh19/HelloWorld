@@ -122,22 +122,56 @@ def test_cone_centers_sit_inside_the_screen():
 def test_drifts_around_the_cone_and_comes_back():
     d = Driver(park_below=50, donut_above=200)
     st = DriveState(x=500.0, facing=1)
-    lifted = False
     looped = False
+    went_behind = False
     for _ in range(int(60 / DT)):
         d.step(st, DT, 70, LEFT, RIGHT, CRUISE,
                sprite_w_px=SPRITE_W, sprite_h_px=SPRITE_H)
         if st.looping:
             looped = True
-        if st.y_off > 1.0:
-            lifted = True
+        if st.behind:
+            went_behind = True
         if looped and not st.looping:
             break
     assert looped, "the car never entered a cone loop"
-    assert lifted, "the loop never lifted the car over the cone"
+    assert went_behind, "the orbit never took the car behind the cone"
     assert st.facing == -1                   # exits heading back to the middle
-    assert st.y_off == 0.0                   # back down on the taskbar
     assert math.isclose(st.yaw % 360.0, 180.0, abs_tol=1.0)
+    # after the loop it eases back to the near lane and ground level
+    run(d, st, ram=70, seconds=2, sprite=True)
+    assert st.y_off == 0.0 and not st.behind
+
+
+def test_orbit_stays_grounded():
+    # The whole point of the redesign: the car never leaves the ground plane.
+    # Its screen offset is bounded by the shallow far-lane depth — a few
+    # pixels — not a jump over the cone.
+    from memgraph.drive_logic import LOOP_DEPTH_FRAC
+    d = Driver(park_below=50, donut_above=80)
+    st = DriveState(x=500.0, facing=1)
+    max_off = 0.0
+    for _ in range(int(60 / DT)):
+        d.step(st, DT, 92, LEFT, RIGHT, CRUISE,
+               sprite_w_px=SPRITE_W, sprite_h_px=SPRITE_H)
+        max_off = max(max_off, st.y_off)
+    assert 0.0 < max_off <= LOOP_DEPTH_FRAC * SPRITE_H + 0.01
+
+
+def test_occlusion_flag_tracks_the_far_side():
+    # In front of the cone at entry, behind it mid-orbit — the widget uses
+    # this to flip window stacking so the cone visibly occludes the car.
+    d = Driver(park_below=50, donut_above=200)
+    st = DriveState(x=500.0, facing=1)
+    entered_in_front = False
+    for _ in range(int(60 / DT)):
+        d.step(st, DT, 70, LEFT, RIGHT, CRUISE,
+               sprite_w_px=SPRITE_W, sprite_h_px=SPRITE_H)
+        if st.looping and not entered_in_front:
+            assert not st.behind             # near-lane entry, in front
+            entered_in_front = True
+        if entered_in_front and st.behind:
+            return
+    raise AssertionError("never saw the far side of the orbit")
 
 
 def test_loop_stays_on_screen():
@@ -154,7 +188,7 @@ def test_loop_carries_drift_momentum():
     # A loop must never crawl: its pace is at least the momentum floor even
     # if the car entered slowly.
     d = Driver(park_below=50, donut_above=200)
-    st = DriveState(x=RIGHT - 2 * loop_radius(SPRITE_W) - 1, facing=1,
+    st = DriveState(x=RIGHT - loop_radius(SPRITE_W) - 1, facing=1,
                     speed=1.0)
     for _ in range(int(5 / DT)):
         d.step(st, DT, 70, LEFT, RIGHT, CRUISE,
