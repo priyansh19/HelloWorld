@@ -378,6 +378,7 @@ class LlamaBuddy(QtWidgets.QWidget):
         for cone in self._cones:
             if not cone.isVisible():
                 cone.show()
+                self._car_behind_cones = None    # freshly shown: restack
         # Occlusion: on the far side of an orbit the cone must draw OVER the
         # car. Stacking flips only when the side actually changes.
         behind = self._drive.behind
@@ -388,6 +389,11 @@ class LlamaBuddy(QtWidgets.QWidget):
                     cone.raise_()
             else:
                 self.raise_()
+                # raising the car re-stacks it above the plume; put the
+                # smoke back on top so the exhaust cloud keeps drawing
+                # over the bodywork
+                if self._smoke is not None and self._smoke.isVisible():
+                    self._smoke.raise_()
 
     def _hide_cones(self) -> None:
         for cone in self._cones:
@@ -510,8 +516,14 @@ class LlamaBuddy(QtWidgets.QWidget):
         self._drag_x = None
         self._press_pos = None
         self._pos_x = float(self.x())     # resume traversal from here
-        self._drive.x = self._pos_x
-        self._drive.park_side = 0         # re-choose the corner if parked
+        st = self._drive
+        st.x = self._pos_x
+        st.park_side = 0                  # re-choose the corner if parked
+        if st.looping:
+            # the user moved the car out of its orbit — don't teleport back;
+            # abandon the loop and pivot to a clean heading from here
+            st.looping = False
+            self._driver._begin_turn_if_needed(st)
         if moved < 6:
             self.clicked.emit()
         else:

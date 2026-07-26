@@ -199,6 +199,31 @@ def test_loop_carries_drift_momentum():
     raise AssertionError("never looped")
 
 
+def test_orbit_speed_ramps_smoothly_and_boosts():
+    # Entry is continuous with cruising pace, then the drift eases UP to a
+    # boosted pace mid-orbit — never an instant jump at the transition.
+    from memgraph.drive_logic import ORBIT_SPEED_BOOST
+    d = Driver(park_below=50, donut_above=200)
+    st = DriveState(x=500.0, facing=1)
+    entry_speed = None
+    peak = 0.0
+    for _ in range(int(60 / DT)):
+        pre = st.speed
+        d.step(st, DT, 70, LEFT, RIGHT, CRUISE,
+               sprite_w_px=SPRITE_W, sprite_h_px=SPRITE_H)
+        if st.looping and entry_speed is None:
+            entry_speed = st.speed
+            # first loop step must be continuous with the cruise speed
+            assert abs(st.speed - pre) < 25.0
+        if st.looping:
+            peak = max(peak, st.speed)
+        if entry_speed is not None and not st.looping:
+            break
+    assert entry_speed is not None
+    assert peak > entry_speed * 1.4          # the drift visibly picks up pace
+    assert peak <= entry_speed * (ORBIT_SPEED_BOOST + 0.6)
+
+
 def test_hot_loop_adds_a_full_corkscrew():
     def total_yaw(ram):
         d = Driver(park_below=50, donut_above=80)

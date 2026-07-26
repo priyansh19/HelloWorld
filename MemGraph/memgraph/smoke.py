@@ -33,7 +33,9 @@ _BASE_ALPHA = 30          # peak per-puff alpha (out of 255) — very see-throug
 _RISE_INCHES = 2.0        # how far above the exhaust the smoke may climb
 _BAND_HEADROOM = 90       # extra window pixels above the rise cap for puff radii
 _BAND_W = 1200            # band width; trailing smoke lives near the car
-_RECENTER_MARGIN = 300    # recentre when the source gets this close to an edge
+_RECENTER_MARGIN = 200    # recentre when the source gets this close to an edge
+                          # (deadband must exceed the cone-orbit swing, ~324px,
+                          #  or the band thrashes with window moves mid-drift)
 
 
 @dataclass

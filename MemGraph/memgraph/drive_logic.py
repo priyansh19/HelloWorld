@@ -62,6 +62,14 @@ CONE_H_FRAC = 0.44       # cone height vs sprite height
 # a drift carries momentum; it never crawls around the cone.
 LOOP_MIN_SPEED_FRAC = 0.75
 
+# A drift is quicker than a cruise: entering an orbit the car eases up to a
+# boosted pace (throttle punch), and winds back down over the last stretch so
+# it exits at cruising speed — both ends stay continuous, no speed snaps.
+ORBIT_SPEED_BOOST = 2.3
+HOT_ORBIT_EXTRA = 1.25   # donut orbits carry even more pace
+LOOP_ACCEL_PX_S2 = 520.0
+ORBIT_WINDDOWN_DEG = 70.0
+
 
 def loop_radius(sprite_w_px: float) -> float:
     """Horizontal radius of the cone loop for a car this wide on screen."""
@@ -126,6 +134,8 @@ class DriveState:
     _loop_theta: float = field(default=270.0, repr=False)
     _loop_end: float = field(default=450.0, repr=False)
     _loop_speed: float = field(default=0.0, repr=False)
+    _loop_base_speed: float = field(default=0.0, repr=False)
+    _loop_target_speed: float = field(default=0.0, repr=False)
     _depth_px: float = field(default=0.0, repr=False)
 
 
@@ -223,14 +233,25 @@ class Driver:
 
         if sprite_w_px > 0:
             r = loop_radius(sprite_w_px)
+            roomy = (right - left) >= 2.2 * r
             if st.facing > 0 and st.x >= right - r:
-                self._begin_loop(st, side=1, ram_pct=ram_pct,
-                                 cruise=target_speed,
-                                 sprite_h_px=sprite_h_px)
+                if roomy:
+                    self._begin_loop(st, side=1, ram_pct=ram_pct,
+                                     cruise=target_speed,
+                                     sprite_h_px=sprite_h_px)
+                else:                            # tiny screen: pivot in place
+                    st.x = min(st.x, right)
+                    st.facing = -1
+                    self._begin_turn_if_needed(st)
             elif st.facing < 0 and st.x <= left + r:
-                self._begin_loop(st, side=-1, ram_pct=ram_pct,
-                                 cruise=target_speed,
-                                 sprite_h_px=sprite_h_px)
+                if roomy:
+                    self._begin_loop(st, side=-1, ram_pct=ram_pct,
+                                     cruise=target_speed,
+                                     sprite_h_px=sprite_h_px)
+                else:
+                    st.x = max(st.x, left)
+                    st.facing = 1
+                    self._begin_turn_if_needed(st)
         # safety clamp for tiny screens / missing sprite size
         if st.x <= left:
             st.x = left
@@ -259,14 +280,26 @@ class Driver:
         st.looping = True
         st._loop_side = side
         st._loop_theta = 270.0
-        st._loop_end = 270.0 + 180.0 + \
-            (360.0 if ram_pct >= self.donut_above else 0.0)
-        st._loop_speed = max(st.speed, LOOP_MIN_SPEED_FRAC * cruise)
+        hot = ram_pct >= self.donut_above
+        st._loop_end = 270.0 + 180.0 + (360.0 if hot else 0.0)
+        base = max(st.speed, LOOP_MIN_SPEED_FRAC * cruise)
+        st._loop_base_speed = base
+        st._loop_target_speed = base * ORBIT_SPEED_BOOST * \
+            (HOT_ORBIT_EXTRA if hot else 1.0)
+        st._loop_speed = max(st.speed, 0.9 * base)   # continuous with entry
         st._depth_px = LOOP_DEPTH_FRAC * max(1.0, sprite_h_px)
 
     def _loop_step(self, st: DriveState, dt: float, left: float, right: float,
                    sprite_w_px: float, sprite_h_px: float) -> None:
         r = loop_radius(sprite_w_px)
+        # Throttle punch in, wind down out: ease toward the boosted drift pace
+        # for most of the orbit, then back toward entry pace over the final
+        # degrees so the exit hands cruising a speed it already has.
+        remaining = st._loop_end - st._loop_theta
+        target = (st._loop_target_speed if remaining > ORBIT_WINDDOWN_DEG
+                  else st._loop_base_speed)
+        st._loop_speed = _ease(st._loop_speed, target, dt,
+                               LOOP_ACCEL_PX_S2, BRAKE_PX_S2)
         v = st._loop_speed
         st.speed = v
         st.spin += v * dt / self.wheel_circ      # wheels churn throughout
@@ -283,7 +316,12 @@ class Driver:
         # ground-plane depth: the far half of the orbit sits a few pixels
         # higher on screen (far lane) and behind the cone — never airborne.
         z = math.sin(a)                          # -1 near .. +1 far
-        st.y_off = st._depth_px * (z + 1.0) / 2.0
+        y_target = st._depth_px * (z + 1.0) / 2.0
+        if st.y_off > y_target:                  # residual from a prior loop
+            fall = max(20.0, st._depth_px / 0.35)
+            st.y_off = max(y_target, st.y_off - fall * dt)
+        else:
+            st.y_off = y_target
         st.behind = z > 0.0
         # heading = the orbit's tangent, mapped onto the baked yaw ring
         # (yaw 0 faces screen-right, yaw 90 faces away from the viewer)
