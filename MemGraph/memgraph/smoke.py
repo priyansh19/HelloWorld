@@ -7,10 +7,12 @@ burnout cloud rather than a screen-filling one. Density and sideways spread
 scale with RAM stress (0..1), and everything stays translucent and transparent
 to mouse input so it never gets in the user's way.
 
-The overlay window is sized to just the smoke band (screen wide, a few hundred
-pixels tall) instead of the whole screen: repainting a translucent layered
-window costs proportionally to its area, and the full-screen version read as
-system-wide lag whenever the plume was active.
+The overlay window is sized to just the smoke band — a strip a bit over a
+thousand pixels wide that FOLLOWS the car, not the whole screen: repainting a
+translucent layered window costs proportionally to its area, and both the
+full-screen and full-width versions read as system-wide lag whenever the plume
+was active. Puffs live in screen coordinates, so sliding the band never moves
+the smoke; the window recentres only when the car nears its edge.
 
 Kept deliberately self-contained; the buddy widget feeds it a source point and
 an intensity each tick.
@@ -30,6 +32,8 @@ _MAX_PUFFS = 140          # hard cap so a pegged machine can't drown in puffs
 _BASE_ALPHA = 30          # peak per-puff alpha (out of 255) — very see-through
 _RISE_INCHES = 2.0        # how far above the exhaust the smoke may climb
 _BAND_HEADROOM = 90       # extra window pixels above the rise cap for puff radii
+_BAND_W = 1200            # band width; trailing smoke lives near the car
+_RECENTER_MARGIN = 300    # recentre when the source gets this close to an edge
 
 
 @dataclass
@@ -73,11 +77,10 @@ class SmokeOverlay(QtWidgets.QWidget):
 
     # ------------------------------------------------------------------ #
     def cover_screen(self, geo: QtCore.QRect) -> None:
-        """Cover just the smoke band at the bottom of the given screen.
+        """Adopt the screen the car is on; the band itself follows the car.
 
-        The rise cap is resolved in real inches via the screen's logical DPI,
-        and the window is a screen-wide strip tall enough for the cap plus a
-        little headroom — far cheaper to composite than a full-screen layer.
+        The rise cap is resolved in real inches via the screen's logical DPI.
+        The actual window is placed/recentred lazily by :meth:`set_source`.
         """
         if geo == self._screen_geo:
             return
@@ -85,13 +88,27 @@ class SmokeOverlay(QtWidgets.QWidget):
         scr = QtGui.QGuiApplication.screenAt(geo.center())
         dpi = float(scr.logicalDotsPerInch()) if scr else 96.0
         self._rise_px = _RISE_INCHES * dpi
+        self._reband(geo.center().x())
+
+    def _reband(self, center_x: float) -> None:
+        geo = self._screen_geo
+        if geo.isNull():
+            return
         band_h = min(geo.height(), int(self._rise_px) + _BAND_HEADROOM)
-        self.setGeometry(geo.left(), geo.bottom() - band_h + 1,
-                         geo.width(), band_h)
+        band_w = min(geo.width(), _BAND_W)
+        x = int(center_x - band_w / 2)
+        x = max(geo.left(), min(geo.right() - band_w + 1, x))
+        self.setGeometry(x, geo.bottom() - band_h + 1, band_w, band_h)
 
     def set_source(self, gx: float, gy: float) -> None:
-        """Exhaust tip in *global* coordinates."""
-        self._src = QtCore.QPointF(gx - self.x(), gy - self.y())
+        """Exhaust tip in *global* coordinates (puffs live in screen space)."""
+        self._src = QtCore.QPointF(gx, gy)
+        # slide the band along only when the car approaches its edge, so the
+        # window itself moves rarely rather than every frame
+        if not self._screen_geo.isNull() and self.width() < self._screen_geo.width():
+            if (gx < self.x() + _RECENTER_MARGIN
+                    or gx > self.x() + self.width() - _RECENTER_MARGIN):
+                self._reband(gx)
 
     def set_intensity(self, stress: float) -> None:
         self._intensity = max(0.0, min(1.0, stress))
@@ -189,6 +206,7 @@ class SmokeOverlay(QtWidgets.QWidget):
         if not self._puffs:
             return
         p = QtGui.QPainter(self)
+        p.translate(-self.x(), -self.y())     # puffs are in screen coords
         sprite = self._sprite()
         rise = max(1.0, self._rise_px)
         src_y = self._src.y()
