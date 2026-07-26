@@ -24,6 +24,7 @@ from . import animal3d, buddy_logic, car3d, car_art
 from .buddy_logic import mood_for
 from .config import Config
 from .drive_logic import Driver, DriveState
+from .fox_logic import FoxDriver, FoxState
 from .metrics import MetricsSampler
 
 
@@ -76,14 +77,17 @@ class LlamaBuddy(QtWidgets.QWidget):
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self._art = _sprite_module(config.buddy_character)
         self._scale = _SCALE_BASE * config.llama_scale
-        self._pad_top = int(6 * config.llama_scale)  # headroom for "!!"/sweat
+        # Extra top headroom for the fox's floating "Zzz" while it sleeps.
+        pad_units = 15 if config.buddy_character == "fox" else 6
+        self._pad_top = int(pad_units * config.llama_scale)
         self._smoke = None            # created lazily for the car character
         self._recompute_size()
 
         self._mood = mood_for(0, 0, config.threshold_amber,
                               config.threshold_red, False)
         self._frame_i = 0
-        self._walk_phase = 0.0         # baked-animal walk-cycle position
+        self._fox_driver = FoxDriver()
+        self._fox = FoxState(x=float(config.llama_x if config.llama_x >= 0 else 0))
         self._blink = False
         self._facing = 1              # 1 → right, -1 → left
         self._drag_x: Optional[int] = None
@@ -181,7 +185,8 @@ class LlamaBuddy(QtWidgets.QWidget):
         self.cfg = cfg
         self._art = _sprite_module(cfg.buddy_character)
         self._scale = _SCALE_BASE * cfg.llama_scale
-        self._pad_top = int(6 * cfg.llama_scale)
+        self._pad_top = int((15 if cfg.buddy_character == "fox" else 6)
+                             * cfg.llama_scale)
         self._recompute_size()
         if cfg.buddy_character != "car":
             self._stop_smoke()
@@ -338,27 +343,26 @@ class LlamaBuddy(QtWidgets.QWidget):
                 self._update_smoke(self._mood.stress)
             return
 
-        # Baked 3D animal: walk (or run, when RAM is hot) back and forth, the
-        # walk cycle advancing with distance travelled so the legs match the
-        # ground speed instead of foot-skating.
+        # Baked 3D fox: the RAM-driven state machine (sleep in the corner,
+        # roam, run, or a wall-jumping frenzy) lives in FoxDriver; the widget
+        # just applies its output. Walk speed is one screen crossing in ~20 s.
         if self._art is animal3d:
-            if not self.cfg.llama_wander:
-                return
-            running = self._mood.stress >= animal3d.RUN_STRESS
-            speed = (geo.width() / 22.0) * (1.9 if running else 1.0) \
-                * self._ram_speed_mult(self._ram_pct)
-            self._pos_x += self._facing * speed * dt
-            if self._pos_x <= left:
-                self._pos_x, self._facing = float(left), 1
-            elif self._pos_x >= right:
-                self._pos_x, self._facing = float(right), -1
-            self.move(int(round(self._pos_x)), self.y())
-            sw, _ = self._sprite_units()
-            stride_px = max(1.0, 0.55 * sw * self._scale)   # px per full cycle
-            self._walk_phase += abs(speed) * dt / stride_px
-            clip = animal3d.clip_for_stress(self._mood.stress)
+            sw, sh = self._sprite_units()
+            st = self._fox
+            st.x = self._pos_x
+            self._fox_driver.step(
+                st, dt, self._ram_pct, float(left), float(right),
+                walk_px_s=geo.width() / 20.0,
+                sprite_w_px=sw * self._scale, sprite_h_px=sh * self._scale)
+            self._pos_x = st.x
+            self._facing = st.facing
+            base_y = geo.bottom() - self.height() + 1     # always on the bar
+            self.move(int(round(self._pos_x)),
+                      base_y - int(round(st.y_off)))
+            clip = animal3d.resolve_clip(st.clip)
             n = animal3d.atlas().frame_count(clip)
-            key = (self._facing, clip, int(self._walk_phase * n) % n)
+            key = (self._facing, clip, int(st.phase * n) % n, st.asleep,
+                   int(st.y_off) > 0)
             if key != self._last_frame_key:
                 self._last_frame_key = key
                 self.update()
@@ -450,6 +454,24 @@ class LlamaBuddy(QtWidgets.QWidget):
     # ------------------------------------------------------------------ #
     # Painting
     # ------------------------------------------------------------------ #
+    def _draw_zzz(self, p: QtGui.QPainter, ox: float, oy: float,
+                  w: float) -> None:
+        """Float three rising 'z's above the sleeping fox's head."""
+        import math
+        p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        # gentle bob so it feels alive even while parked
+        t = (self._fox.phase * math.tau)
+        cx = ox + w * (0.30 if self._facing == 1 else 0.70)
+        base = self._scale
+        for i, ch in enumerate("zzZ"):
+            f = QtGui.QFont("Segoe UI", int(4 * base) + i * int(1.5 * base),
+                            QtGui.QFont.Bold)
+            p.setFont(f)
+            p.setPen(QtGui.QColor(210, 220, 235,
+                                  200 - i * 40 + int(30 * math.sin(t))))
+            p.drawText(QtCore.QPointF(cx + i * 4 * base,
+                                      oy - i * 4 * base + 2 * base), ch)
+
     def paintEvent(self, _e: QtGui.QPaintEvent) -> None:
         m = self._mood
         art = self._art
@@ -470,13 +492,14 @@ class LlamaBuddy(QtWidgets.QWidget):
                 p.drawImage(QtCore.QRectF(ox, oy, w, h), img)
             return
 
-        # Baked 3D animal (the fox): a walk/run cycle frame, mirrored to face
-        # its travel direction.
+        # Baked 3D fox: the clip/phase the FoxDriver chose, mirrored to face
+        # its travel direction, with a floating "Zzz" while it sleeps.
         if art is animal3d:
             sw, sh = self._sprite_units()
             w, h = sw * s, sh * s
-            clip = animal3d.clip_for_stress(m.stress)
-            img = animal3d.frame_image(int(round(w)), clip, self._walk_phase)
+            st = self._fox
+            img = animal3d.frame_image(int(round(w)),
+                                       animal3d.resolve_clip(st.clip), st.phase)
             if img is not None:
                 p.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
                 p.save()
@@ -485,6 +508,8 @@ class LlamaBuddy(QtWidgets.QWidget):
                     p.scale(-1, 1)
                 p.drawImage(QtCore.QRectF(ox, oy, w, h), img)
                 p.restore()
+            if st.asleep:
+                self._draw_zzz(p, ox, oy, w)
             return
 
         # Vector characters rasterise to a cached high-resolution image

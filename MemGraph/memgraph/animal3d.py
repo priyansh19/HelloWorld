@@ -27,11 +27,11 @@ from PySide6 import QtCore, QtGui
 SPRITE_W = 66
 SPRITE_H = 40           # provisional until an atlas is loaded
 
-# Which baked clip plays at rest vs under load, and the RAM stress at which the
-# animal breaks into a run.
+# Baked clip names. The RAM-band behaviour lives in fox_logic.FoxDriver; these
+# just name the clips this atlas is expected to carry.
 WALK_CLIP = "Walk"
 RUN_CLIP = "Run"
-RUN_STRESS = 0.25       # mood.stress at/above which the fox runs
+SLEEP_CLIP = "Survey"    # gentle idle used while the fox is curled up asleep
 
 
 def _asset_roots() -> list[Path]:
@@ -138,11 +138,11 @@ def sprite_units() -> tuple[int, int]:
     return SPRITE_W, SPRITE_H
 
 
-def clip_for_stress(stress: float) -> str:
-    """Walk normally; run once RAM stress crosses the threshold."""
+def resolve_clip(clip: str) -> str:
+    """Map a requested clip to one this atlas actually has (Walk fallback)."""
     a = atlas()
-    if a is not None and a.has(RUN_CLIP) and stress >= RUN_STRESS:
-        return RUN_CLIP
+    if a is not None and a.has(clip):
+        return clip
     return WALK_CLIP
 
 

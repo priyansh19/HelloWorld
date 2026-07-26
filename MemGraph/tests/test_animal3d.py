@@ -38,13 +38,17 @@ def test_frames_have_transparent_background():
     assert img.pixelColor(0, 0).alpha() == 0
 
 
-def test_runs_when_stressed_walks_when_calm():
+def test_resolve_clip_falls_back_to_walk():
     a = A.atlas()
-    calm = A.clip_for_stress(0.0)
-    assert calm == A.WALK_CLIP
+    assert A.resolve_clip(A.WALK_CLIP) == A.WALK_CLIP
     if a.has(A.RUN_CLIP):
-        assert A.clip_for_stress(A.RUN_STRESS) == A.RUN_CLIP
-        assert A.clip_for_stress(1.0) == A.RUN_CLIP
+        assert A.resolve_clip(A.RUN_CLIP) == A.RUN_CLIP
+    assert A.resolve_clip("NoSuchClip") == A.WALK_CLIP
+
+
+def test_ships_the_sleep_idle_clip():
+    # sleeping in the corner uses the Survey idle clip
+    assert A.atlas().has(A.SLEEP_CLIP)
 
 
 def test_sprite_units_follow_atlas_aspect():

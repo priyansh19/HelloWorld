@@ -1,7 +1,8 @@
 {
   "clips": {
     "Walk": 16,
-    "Run": 16
+    "Run": 16,
+    "Survey": 16
   },
   "pattern": "{clip}_{frame:02d}.webp",
   "feet_y": 1.0,
